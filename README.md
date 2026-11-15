@@ -19,8 +19,9 @@ npm run dev        # http://localhost:5000
 | Space | Lower / raise implement |
 | E | Interact: garage & shop, sell grain at silo, refuel |
 | 1 2 3 | Choose seed (wheat, corn, canola) |
-| C | Toggle chase / overhead camera |
+| C | Cycle camera: chase / cab (first-person) / overhead |
 | Mouse wheel | Zoom |
+| Mouse drag | Look around (cab view) |
 | M | Mute / unmute sound |
 | H | Help |
 
