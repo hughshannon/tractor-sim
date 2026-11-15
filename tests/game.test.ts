@@ -104,6 +104,47 @@ describe('Game', () => {
     expect(g.money).toBe(100000 - 9000 - 15000 - 12000);
   });
 
+  it('emits sound events for player actions', () => {
+    const g = new Game();
+    const events: string[] = [];
+    g.onEvent = (e) => events.push(e);
+    g.toggleLower();
+    g.toggleLower();
+    g.grain = { crop: 'wheat', amount: 100 };
+    g.sellGrain();
+    g.sellGrain(); // empty tank -> no sell event
+    g.money = 100000;
+    g.buyImplement('plow_l');
+    g.attach('plow_l');
+    g.fuel = 10;
+    g.refuel();
+    g.notify('Something bad', 'warn');
+    expect(events).toEqual(['lower', 'raise', 'sell', 'buy', 'attach', 'refuel', 'warn']);
+  });
+
+  it('emits a bump event when hitting a building at speed', () => {
+    const g = new Game();
+    const events: string[] = [];
+    g.onEvent = (e) => events.push(e);
+    // Drive straight at the shed's front wall.
+    g.tractor.x = -15;
+    g.tractor.z = 2;
+    g.tractor.heading = Math.PI;
+    for (let i = 0; i < 180; i++) g.update(1 / 60, { throttle: 1, steer: 0, brake: false });
+    expect(events).toContain('bump');
+  });
+
+  it('flags workingNow only while the implement engages the ground', () => {
+    const g = new Game();
+    g.update(1 / 60, idle);
+    expect(g.workingNow).toBe(false);
+    g.lowered = true;
+    g.lowerAnim = 1;
+    g.tractor.speed = 3;
+    g.update(1 / 60, { throttle: 1, steer: 0, brake: false });
+    expect(g.workingNow).toBe(true);
+  });
+
   it('opens the shop only at the shed', () => {
     const g = new Game();
     expect(g.interact()).toBeNull();

@@ -21,6 +21,7 @@ npm run dev        # http://localhost:5000
 | 1 2 3 | Choose seed (wheat, corn, canola) |
 | C | Toggle chase / overhead camera |
 | Mouse wheel | Zoom |
+| M | Mute / unmute sound |
 | H | Help |
 
 **Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → wait for growth → harvest again.
@@ -53,5 +54,6 @@ and use **Deploy → Static** (build: `npm ci && npm run build`, public dir: `di
 - [x] M2 Fields + plow
 - [x] M3 Seed, grow, harvest
 - [x] M4 Economy, HUD, shop
+- [x] Synthesised sound (engine, implements, effects, ambience)
 - [ ] M5 Day/night, seasons, weather, save/load
-- [ ] M6 Sound, particles, minimap, touch controls
+- [ ] M6 Particles, minimap, touch controls

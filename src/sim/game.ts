@@ -16,6 +16,10 @@ export interface Message {
   kind: 'info' | 'good' | 'warn';
 }
 
+export type GameEvent =
+  | 'sell' | 'refuel' | 'buy' | 'attach' | 'warn' | 'bump'
+  | 'lower' | 'raise';
+
 export type ActionResult = { ok: true; text: string } | { ok: false; text: string };
 
 export class Game {
@@ -35,7 +39,12 @@ export class Game {
   grain: { crop: CropId | null; amount: number } = { crop: null, amount: 0 };
   messages: Message[] = [];
   stats = { earned: 0, harvested: 0 };
+  /** True during frames where the implement is actually engaging the ground. */
+  workingNow = false;
+  /** Optional listener for sound/effects; the sim never depends on it. */
+  onEvent: ((e: GameEvent) => void) | null = null;
   private lastNotice = new Map<string, number>();
+  private lastBump = -10;
 
   constructor() {
     this.fuel = this.tractorDef.fuelCapacity;
@@ -59,7 +68,12 @@ export class Game {
     if (last !== undefined && this.time - last < cooldown) return;
     this.lastNotice.set(text, this.time);
     this.messages.push({ text, time: this.time, kind });
+    if (kind === 'warn') this.emit('warn');
     if (this.messages.length > 6) this.messages.shift();
+  }
+
+  emit(e: GameEvent): void {
+    this.onEvent?.(e);
   }
 
   price(crop: CropId): number {
@@ -101,19 +115,27 @@ export class Game {
       wheelBase: 2.6,
       maxSteer: 0.6,
     });
-    for (const b of BUILDINGS) resolveBox(this.tractor, TRACTOR_RADIUS, b.box);
+    const impactSpeed = Math.abs(this.tractor.speed);
+    let hit = false;
+    for (const b of BUILDINGS) hit = resolveBox(this.tractor, TRACTOR_RADIUS, b.box) || hit;
     const t = this.tractor;
     const lim = WORLD_HALF - 2;
     if (Math.abs(t.x) > lim || Math.abs(t.z) > lim) {
       t.x = Math.max(-lim, Math.min(lim, t.x));
       t.z = Math.max(-lim, Math.min(lim, t.z));
       t.speed *= 0.3;
+      hit = true;
+    }
+    if (hit && impactSpeed > 2 && this.time - this.lastBump > 0.6) {
+      this.lastBump = this.time;
+      this.emit('bump');
     }
 
     this.lowerAnim += (this.lowered ? 1 : -1) * dt * 2.5;
     this.lowerAnim = Math.max(0, Math.min(1, this.lowerAnim));
 
-    if (working && this.lowerAnim > 0.9 && Math.abs(t.speed) > 0.3) this.work();
+    this.workingNow = working && this.lowerAnim > 0.9 && Math.abs(t.speed) > 0.3;
+    if (this.workingNow) this.work();
 
     for (const f of this.fields) f.update(dt);
   }
@@ -188,6 +210,7 @@ export class Game {
       return;
     }
     this.lowered = !this.lowered;
+    this.emit(this.lowered ? 'lower' : 'raise');
   }
 
   /** Context action for the zone the tractor is in. Returns 'shop' if the shop should open. */
@@ -211,6 +234,7 @@ export class Game {
     this.money += total;
     this.stats.earned += total;
     this.grain = { crop: null, amount: 0 };
+    this.emit('sell');
     return { ok: true, text: `Sold ${amount} L of ${CROPS[crop].name} for $${total.toLocaleString()}.` };
   }
 
@@ -222,6 +246,7 @@ export class Game {
     const cost = Math.ceil(litres * FUEL_PRICE);
     this.money -= cost;
     this.fuel += litres;
+    this.emit('refuel');
     return { ok: true, text: `Refuelled ${Math.round(litres)} L for $${cost}.` };
   }
 
@@ -238,12 +263,14 @@ export class Game {
     const fail = this.spend(def.price, def.name);
     if (fail) return fail;
     this.ownedImplements.add(id);
+    this.emit('buy');
     return { ok: true, text: `Bought ${def.name}.` };
   }
 
   attach(id: string | null): ActionResult {
     if (id !== null && !this.ownedImplements.has(id)) return { ok: false, text: 'You do not own that implement.' };
     this.attached = id;
+    this.emit('attach');
     this.lowered = false;
     this.lowerAnim = 0;
     return { ok: true, text: id ? `Attached ${IMPLEMENTS[id].name}.` : 'Detached implement.' };
@@ -256,6 +283,7 @@ export class Game {
     const fail = this.spend(def.price, def.name);
     if (fail) return fail;
     this.ownedTractors.add(id);
+    this.emit('buy');
     return this.selectTractor(id);
   }
 
@@ -276,6 +304,7 @@ export class Game {
     const fail = this.spend(f.price, f.name);
     if (fail) return fail;
     f.owned = true;
+    this.emit('buy');
     return { ok: true, text: `Bought ${f.name}!` };
   }
 
