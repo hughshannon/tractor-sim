@@ -7,16 +7,19 @@ import { createScene } from './render/scene';
 import { TractorView } from './render/tractorView';
 import { buildWorld } from './render/worldView';
 import { CROP_IDS } from './sim/crops';
-import { Game } from './sim/game';
+import { FarmSaves } from './sim/save';
 import { Hud } from './ui/hud';
 import { Shop } from './ui/shop';
+import { saveControls } from './ui/saveControls';
 
 const STEP = 1 / 60;
 
 const container = document.getElementById('app')!;
 const uiRoot = document.getElementById('ui')!;
 
-const game = new Game();
+const saves = new FarmSaves(() => window.localStorage);
+const loaded = saves.load();
+const game = loaded.game;
 const { renderer, scene, camera, sun } = createScene(container);
 buildWorld(scene, game.fields);
 const fieldViews = game.fields.map((f) => {
@@ -31,6 +34,8 @@ const rig = new CameraRig(camera, renderer.domElement);
 const input = new Input();
 const hud = new Hud(uiRoot, game);
 const shop = new Shop(uiRoot, game, () => (input.enabled = true));
+saveControls(uiRoot, saves, loaded);
+if (loaded.status === 'loaded') hud.toggleHelp(false);
 
 const sound = new SoundEngine();
 game.onEvent = (e) => sound.play(e);
@@ -65,7 +70,8 @@ input.on('KeyC', () => rig.toggle());
 input.on('KeyM', toggleMute);
 CROP_IDS.forEach((id, i) => input.on([`Digit${i + 1}`, `Numpad${i + 1}`], () => !paused() && game.setSeed(id)));
 
-game.notify('Your wheat is ripe! Lower the harvester with Space and drive through the Home Field.', 'info', 0);
+if (loaded.status === 'loaded') game.notify('Welcome back! Your farm has been restored.', 'good', 0);
+else game.notify('Your wheat is ripe! Lower the harvester with Space and drive through the Home Field.', 'info', 0);
 
 let last = performance.now();
 let acc = 0;

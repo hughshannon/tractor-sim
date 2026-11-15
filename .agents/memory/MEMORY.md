@@ -1,0 +1,1 @@
+- [Farm save safety](farm-save-safety.md) — preserve unreadable player progress rather than silently replacing it; offline time intentionally does not advance the farm.
