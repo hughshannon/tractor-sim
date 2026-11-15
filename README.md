@@ -35,6 +35,10 @@ npm run typecheck
 npm run build      # static build into dist/
 ```
 
+**Crop models** are built procedurally in `src/render/cropModels.ts` (one low-poly model per crop per growth stage).
+Run `npm run dev` and open `/crops.html` to see every crop at every stage side by side; add `?at=col,row` to zoom
+on one plot (e.g. `?at=4,0` for ripe wheat).
+
 ```
 src/
   sim/      pure game logic: fields, crops, tractor physics, market, economy (unit tested)

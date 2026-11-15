@@ -11,7 +11,7 @@ export interface CropDef {
   seedCostPerTile: number;
   /** Base market price per litre. */
   basePrice: number;
-  /** Colours: young plant, ripe plant. */
+  /** Base colours for the crop models: young foliage, ripe plant. */
   youngColor: number;
   ripeColor: number;
   /** Full-grown plant height in metres. */
@@ -29,7 +29,7 @@ export const CROPS: Record<CropId, CropDef> = {
   },
   canola: {
     id: 'canola', name: 'Canola', growTime: 120, yieldPerTile: 8, seedCostPerTile: 3,
-    basePrice: 2.1, youngColor: 0x58a848, ripeColor: 0xf2dc30, height: 1.1,
+    basePrice: 2.1, youngColor: 0x58a848, ripeColor: 0xb8a060, height: 1.1,
   },
 };
 
