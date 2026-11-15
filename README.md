@@ -25,10 +25,12 @@ npm run dev        # http://localhost:5000
 | M | Mute / unmute sound |
 | H | Help |
 
-**Cab view:** in the first-person cab view the screen HUD is replaced by working instruments: a speedometer,
-fuel and grain-tank gauges with warning lamps behind the wheel, a GPS screen with a heading-up map of the farm
-coloured by tile state (unworked, plowed, growing, ripe, harvested stubble) and a farm terminal with money, clock,
-implement, seed choice, market prices and prompts. Drag to look around; scroll to narrow the view to read them.
+**Cab view:** in the first-person cab view the screen HUD is replaced by instruments in the cab: a speedometer,
+fuel and grain-tank gauges with warning lamps behind the wheel; a small low-res GPS on the dash (right) with a
+heading-up pixel map coloured by ground state (unworked, plowed, growing, ripe, harvested, not owned) and the
+current field's progress for the attached implement; and a two-line LCD on the dash (left) with money, the clock
+with sun/moon, and the implement up/down. Market prices and messages aren't shown in the cab. Drag to look
+around; scroll to narrow the view.
 
 **Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → wait for growth → harvest again.
 Swap implements (plow, seeder, harvester) at the garage. Prices drift over time, so check the market panel before selling.

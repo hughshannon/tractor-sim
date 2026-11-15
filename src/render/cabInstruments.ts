@@ -1,21 +1,18 @@
 import * as THREE from 'three';
-import { CROPS, CROP_IDS } from '../sim/crops';
 import { clockText, lampsOn, nightFactor } from '../sim/daylight';
-import { BUILDINGS, TRACKS, ZONES } from '../sim/farm';
-import { type Field, TileState } from '../sim/field';
 import type { Game } from '../sim/game';
-import { priceTrend } from '../sim/market';
 import { money } from '../ui/dom';
-import {
-  STATE_NAMES, STATE_ORDER, fieldReport, grainText, percent, promptText, reversing, showGrain, speedKmh,
-} from '../ui/readouts';
-import { box, cyl } from './util';
+import { fieldProgress, percent, reversing, showGrain, speedKmh } from '../ui/readouts';
+import { mapColor } from './gpsMap';
+import { drawPixelText, pixelTextWidth } from './pixelFont';
+import { box } from './util';
 
 /**
  * Working instruments inside the cab, drawn onto canvas textures:
  *  - an instrument cluster behind the steering wheel (speedometer, fuel and grain-tank gauges, warning lamps),
- *  - a GPS screen on the right pillar with a heading-up map of the farm coloured by what each tile needs,
- *  - a farm terminal on the left pillar (money, clock, implement, seed, market, prompts and messages).
+ *  - a small low-resolution GPS on the dash to the right of the wheel: a heading-up pixel map coloured by
+ *    ground state, with the current field and how much of it the implement has done,
+ *  - a two-line LCD on the dash to the left of the wheel: money, clock with sun/moon, implement up/down.
  * They replace the screen HUD in the cab view. Screens are unlit so they stay readable at night.
  */
 
@@ -26,17 +23,11 @@ const DIM = '#9aa596';
 const ACCENT = '#ffd23a';
 const GOOD = '#9cf27a';
 const WARN = '#ff8a7a';
+const LCD_BG = '#0d1a10';
 
-/** Map colours for each tile state; growing crops brighten as they mature. */
-export const TILE_COLORS: Record<TileState, string> = {
-  [TileState.Grass]: '#6f8f3f',
-  [TileState.Plowed]: '#7b4a26',
-  [TileState.Seeded]: '#3fae74',
-  [TileState.Ripe]: '#e0c060',
-  [TileState.Stubble]: '#ddd2ac',
-};
-const SEEDED_FROM = new THREE.Color('#1f6a46');
-const SEEDED_TO = new THREE.Color('#7ee2a2');
+/** GPS: 40×30 map texels at 4 m each, plus an 8-texel status line. */
+const GPS_W = 40, GPS_MAP_H = 30, GPS_H = 38, GPS_M_PER_TEXEL = 4, GPS_TRACTOR_ROW = 20;
+const LCD_W = 68, LCD_H = 15;
 
 /** One canvas-backed display: a glowing plane in a dark bezel. */
 class Screen {
@@ -45,20 +36,33 @@ class Screen {
   readonly texture: THREE.CanvasTexture;
   readonly group = new THREE.Group();
   private nextDraw = 0;
+  private hz: number;
 
-  constructor(px: number, py: number, readonly w: number, readonly h: number, anisotropy: number, private hz: number) {
+  constructor(
+    px: number, py: number, readonly w: number, readonly h: number,
+    opts: { hz: number; anisotropy?: number; pixelated?: boolean; border?: number },
+  ) {
+    this.hz = opts.hz;
     this.canvas.width = px;
     this.canvas.height = py;
     this.ctx = this.canvas.getContext('2d')!;
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
-    this.texture.anisotropy = anisotropy;
+    if (opts.pixelated) {
+      // Hard-edged texels, like a cheap low-res LCD.
+      this.texture.magFilter = THREE.NearestFilter;
+      this.texture.minFilter = THREE.NearestFilter;
+      this.texture.generateMipmaps = false;
+    } else {
+      this.texture.anisotropy = opts.anisotropy ?? 1;
+    }
     const glass = new THREE.Mesh(
       new THREE.PlaneGeometry(w, h),
       new THREE.MeshBasicMaterial({ map: this.texture, toneMapped: false }),
     );
     glass.position.z = 0.002;
-    const bezel = box(w + 0.03, h + 0.03, 0.03, 0x161616, 0, 0, -0.016);
+    const border = opts.border ?? 0.015;
+    const bezel = box(w + border * 2, h + border * 2, 0.025, 0x161616, 0, 0, -0.013);
     bezel.castShadow = false;
     this.group.add(bezel, glass);
   }
@@ -81,26 +85,19 @@ function face(obj: THREE.Object3D, eye: THREE.Vector3): void {
   obj.quaternion.setFromRotationMatrix(m);
 }
 
-/** A thin bar between two points (mounting arms). */
-function strut(a: THREE.Vector3, b: THREE.Vector3, r: number): THREE.Mesh {
-  const len = a.distanceTo(b);
-  const m = cyl(r, r, len, 0x222222, 6);
-  m.position.copy(a).add(b).multiplyScalar(0.5);
-  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), b.clone().sub(a).normalize());
-  return m;
-}
+/** Top of the dashboard box in tractor body space. */
+const DASH_TOP = 1.9;
 
 export class CabInstruments {
   /** Add this to the tractor body; positions are in body space (+Z forward, +X to the driver's left). */
   readonly group = new THREE.Group();
   private cluster: Screen;
   private gps: Screen;
-  private terminal: Screen;
-  private fieldImages = new Map<Field, { canvas: HTMLCanvasElement; version: number; at: number }>();
+  private lcd: Screen;
 
   constructor(private game: Game, eye: THREE.Vector3, anisotropy = 1) {
     // Cluster: on the steering column, read through the top half of the wheel.
-    this.cluster = new Screen(512, 192, 0.36, 0.135, anisotropy, 30);
+    this.cluster = new Screen(512, 192, 0.36, 0.135, { hz: 30, anisotropy });
     this.cluster.group.position.set(0, 2.05, -0.15);
     face(this.cluster.group, eye);
     const hood = box(0.42, 0.025, 0.1, 0x1a1a1a, 0, 0.085, 0.03);
@@ -108,22 +105,28 @@ export class CabInstruments {
     this.cluster.group.add(hood);
     this.group.add(this.cluster.group, box(0.42, 0.16, 0.14, 0x202020, 0, 1.94, -0.1));
 
-    // GPS on the right (driver's right is -X), farm terminal on the left, both on arms from the front pillars.
-    this.gps = new Screen(512, 384, 0.3, 0.225, anisotropy, 24);
-    this.terminal = new Screen(512, 384, 0.3, 0.225, anisotropy, 6);
-    for (const [screen, side] of [[this.gps, -1], [this.terminal, 1]] as const) {
-      const pos = new THREE.Vector3(side * 0.41, 2.27, -0.27);
-      screen.group.position.copy(pos);
-      face(screen.group, eye);
-      this.group.add(screen.group, strut(pos.clone().add(new THREE.Vector3(side * 0.08, 0, 0.04)), new THREE.Vector3(side * 0.6, 2.27, -0.12), 0.015));
-    }
+    // Dash pods either side of the cluster, clear of the wheel rim: GPS to the right (-X), LCD to the left.
+    this.gps = new Screen(GPS_W, GPS_H, 0.13, (0.13 * GPS_H) / GPS_W, { hz: 10, pixelated: true, border: 0.01 });
+    this.lcd = new Screen(LCD_W, LCD_H, 0.17, (0.17 * LCD_H) / LCD_W, { hz: 4, pixelated: true, border: 0.008 });
+    this.mountOnDash(this.gps, -0.35, eye);
+    this.mountOnDash(this.lcd, 0.375, eye);
     this.update(0, true);
+  }
+
+  /** Stand a screen on the dash top at `x`, facing the driver, on a pod that fills the gap below it. */
+  private mountOnDash(screen: Screen, x: number, eye: THREE.Vector3): void {
+    const lift = 0.11;
+    const y = DASH_TOP + lift + screen.h / 2;
+    screen.group.position.set(x, y, -0.2);
+    face(screen.group, eye);
+    const pod = box(Math.min(0.08, screen.w), lift, 0.05, 0x202020, x, DASH_TOP + lift / 2, -0.17);
+    this.group.add(screen.group, pod);
   }
 
   update(now: number, force = false): void {
     if (this.cluster.due(now, force)) this.drawCluster(now);
-    if (this.gps.due(now, force)) this.drawGps(now);
-    if (this.terminal.due(now, force)) this.drawTerminal(now);
+    if (this.gps.due(now, force)) this.drawGps();
+    if (this.lcd.due(now, force)) this.drawLcd();
   }
 
   // ---------------------------------------------------------------- cluster
@@ -172,316 +175,71 @@ export class CabInstruments {
     s.commit();
   }
 
-  // ---------------------------------------------------------------- GPS map
+  // ---------------------------------------------------------------- GPS
 
-  private drawGps(now: number): void {
+  private drawGps(): void {
     const g = this.game, s = this.gps, c = s.ctx;
-    const W = s.canvas.width, H = s.canvas.height;
-    const MAP_H = 316;
-    const scale = 3.2; // px per metre: about 160 m across
     const t = g.tractor;
-    const cx = W / 2, cy = MAP_H * 0.68;
     const sin = Math.sin(t.heading), cos = Math.cos(t.heading);
-    // Heading-up: the tractor's forward is screen-up and its left is screen-left.
-    const a = -scale * cos, b = -scale * sin, cc = scale * sin, d = -scale * cos;
-    const e = cx - (a * t.x + cc * t.z), f = cy - (b * t.x + d * t.z);
-    const toScreen = (x: number, z: number): [number, number] => [a * x + cc * z + e, b * x + d * z + f];
-
-    c.setTransform(1, 0, 0, 1, 0, 0);
-    c.fillStyle = '#2b4122';
-    c.fillRect(0, 0, W, H);
-    c.save();
-    c.beginPath();
-    c.rect(0, 0, W, MAP_H);
-    c.clip();
-    c.setTransform(a, b, cc, d, e, f);
-
-    for (const tr of TRACKS) {
-      c.fillStyle = tr.yard ? '#9a8a66' : '#86764f';
-      c.fillRect(tr.x - tr.w / 2, tr.z - tr.d / 2, tr.w, tr.d);
-    }
-    c.imageSmoothingEnabled = false;
-    for (const fld of g.fields) {
-      c.globalAlpha = fld.owned ? 1 : 0.45;
-      c.drawImage(this.fieldImage(fld, now), fld.x, fld.z, fld.width, fld.depth);
-      c.globalAlpha = 1;
-      c.lineWidth = 0.5;
-      c.strokeStyle = fld.owned ? 'rgba(255,255,255,0.7)' : 'rgba(255,210,58,0.7)';
-      c.setLineDash(fld.owned ? [] : [2, 2]);
-      c.strokeRect(fld.x, fld.z, fld.width, fld.depth);
-      c.setLineDash([]);
-    }
-    for (const bl of BUILDINGS) {
-      c.fillStyle = '#4c5258';
-      c.fillRect(bl.box.minX, bl.box.minZ, bl.box.maxX - bl.box.minX, bl.box.maxZ - bl.box.minZ);
-    }
-    c.strokeStyle = ACCENT;
-    c.lineWidth = 0.6;
-    for (const z of ZONES) {
-      c.beginPath();
-      c.arc(z.x, z.z, z.radius, 0, Math.PI * 2);
-      c.stroke();
-    }
-    // Implement working bar, across the direction of travel.
-    const imp = g.implement;
-    if (imp) {
-      const p = g.implementPos();
-      const lx = cos * imp.width / 2, lz = -sin * imp.width / 2;
-      c.strokeStyle = g.workingNow ? GOOD : g.lowered ? ACCENT : '#c8c8c8';
-      c.lineWidth = 0.9;
-      c.lineCap = 'round';
-      c.beginPath();
-      c.moveTo(p.x - lx, p.z - lz);
-      c.lineTo(p.x + lx, p.z + lz);
-      c.stroke();
-      c.lineCap = 'butt';
-    }
-    c.setTransform(1, 0, 0, 1, 0, 0);
-
-    // Labels stay upright.
-    c.textAlign = 'center';
-    c.font = `700 13px ${FONT}`;
-    const label = (text: string, x: number, y: number, color: string) => {
-      c.lineWidth = 3;
-      c.strokeStyle = 'rgba(0,0,0,0.75)';
-      c.strokeText(text, x, y);
-      c.fillStyle = color;
-      c.fillText(text, x, y);
-    };
-    for (const fld of g.fields) {
-      const [x, y] = toScreen(fld.x + fld.width / 2, fld.z + fld.depth / 2);
-      label(fld.name, x, y, TEXT);
-      if (!fld.owned) label(`FOR SALE ${money(fld.price)}`, x, y + 15, ACCENT);
-    }
-    c.font = `700 11px ${FONT}`;
-    const zoneNames = { shed: 'SHOP', silo: 'SILO', fuel: 'FUEL' };
-    for (const z of ZONES) {
-      const [x, y] = toScreen(z.x, z.z);
-      label(zoneNames[z.id], x, y + 4, ACCENT);
-    }
-
-    // Tractor marker: a fixed-size arrow pointing up.
-    c.fillStyle = '#ffffff';
-    c.strokeStyle = '#d23a2a';
-    c.lineWidth = 2.5;
-    c.beginPath();
-    c.moveTo(cx, cy - 13);
-    c.lineTo(cx + 8, cy + 9);
-    c.lineTo(cx, cy + 4);
-    c.lineTo(cx - 8, cy + 9);
-    c.closePath();
-    c.fill();
-    c.stroke();
-
-    // Compass (north is +Z) and scale bar.
-    const nx = cc / scale, ny = d / scale;
-    c.fillStyle = 'rgba(0,0,0,0.55)';
-    c.beginPath();
-    c.arc(30, 30, 22, 0, Math.PI * 2);
-    c.fill();
-    c.strokeStyle = '#ff5a4a';
-    c.lineWidth = 3;
-    c.beginPath();
-    c.moveTo(30 - nx * 6, 30 - ny * 6);
-    c.lineTo(30 + nx * 8, 30 + ny * 8);
-    c.stroke();
-    c.font = `800 12px ${FONT}`;
-    c.fillStyle = TEXT;
-    c.textBaseline = 'middle';
-    c.fillText('N', 30 + nx * 16, 30 + ny * 16);
-    c.textBaseline = 'alphabetic';
-    const bar = 20 * scale;
-    c.fillStyle = 'rgba(0,0,0,0.55)';
-    c.fillRect(W - bar - 26, 10, bar + 16, 28);
-    c.fillStyle = TEXT;
-    c.fillRect(W - bar - 18, 28, bar, 3);
-    c.font = `700 11px ${FONT}`;
-    c.fillText('20 m', W - bar / 2 - 18, 23);
-    c.restore();
-
-    // Status bar: the field you're in and how much of it is in each state.
-    c.fillStyle = '#121a13';
-    c.fillRect(0, MAP_H, W, H - MAP_H);
-    c.fillStyle = '#2e3a2f';
-    c.fillRect(0, MAP_H, W, 2);
-    const report = fieldReport(g);
-    c.textAlign = 'left';
-    if (report) {
-      c.font = `800 17px ${FONT}`;
-      c.fillStyle = report.field.owned ? TEXT : ACCENT;
-      c.fillText(report.field.name + (report.field.owned ? '' : ' — not owned'), 12, MAP_H + 24);
-      if (report.underImplement) {
-        c.textAlign = 'right';
-        c.font = `600 13px ${FONT}`;
-        c.fillStyle = DIM;
-        c.fillText(`Implement: ${report.underImplement}`, W - 12, MAP_H + 23);
-        c.textAlign = 'left';
+    // Heading-up: screen-up is the tractor's forward (sin h, cos h), screen-left its left (cos h, -sin h).
+    for (let v = 0; v < GPS_MAP_H; v++) {
+      for (let u = 0; u < GPS_W; u++) {
+        const left = -(u + 0.5 - GPS_W / 2) * GPS_M_PER_TEXEL;
+        const fwd = -(v + 0.5 - GPS_TRACTOR_ROW) * GPS_M_PER_TEXEL;
+        c.fillStyle = mapColor(g, t.x + fwd * sin + left * cos, t.z + fwd * cos - left * sin);
+        c.fillRect(u, v, 1, 1);
       }
-      legend(c, 12, MAP_H + 50, report.coverage.map(({ state, share }) => [state, `${STATE_NAMES[state]} ${percent(share)}`]));
-    } else {
-      c.font = `800 17px ${FONT}`;
-      c.fillStyle = TEXT;
-      c.fillText(g.zone ? g.zone.label : 'Off field', 12, MAP_H + 24);
-      legend(c, 12, MAP_H + 50, STATE_ORDER.map((st) => [st, st === TileState.Grass ? 'Unworked' : STATE_NAMES[st]]));
     }
+    // Tractor arrow, fixed and pointing up, with a red nose.
+    const ax = GPS_W / 2, ay = GPS_TRACTOR_ROW;
+    c.fillStyle = '#ffffff';
+    for (const [dx, dy] of [[-1, -1], [0, -1], [1, -1], [-1, 0], [0, 0], [1, 0], [-2, 1], [-1, 1], [1, 1], [2, 1]]) {
+      c.fillRect(ax + dx, ay + dy, 1, 1);
+    }
+    c.fillStyle = '#d23a2a';
+    c.fillRect(ax, ay - 2, 1, 1);
+
+    // Status line: field and progress.
+    c.fillStyle = BG;
+    c.fillRect(0, GPS_MAP_H, GPS_W, GPS_H - GPS_MAP_H);
+    const { name, done, onField } = fieldProgress(g);
+    drawPixelText(c, name.slice(0, 5), 1, GPS_MAP_H + 2, TEXT);
+    const pct = !onField ? '' : done === null ? '--' : percent(done);
+    if (pct) drawPixelText(c, pct, GPS_W - 1 - pixelTextWidth(pct), GPS_MAP_H + 2, done !== null && done >= 1 ? ACCENT : GOOD);
     s.commit();
   }
 
-  /** One pixel per tile, cached until the field changes (or once a second while crops grow). */
-  private fieldImage(f: Field, now: number): HTMLCanvasElement {
-    let img = this.fieldImages.get(f);
-    if (!img) {
-      const canvas = document.createElement('canvas');
-      canvas.width = f.cols;
-      canvas.height = f.rows;
-      img = { canvas, version: -1, at: -Infinity };
-      this.fieldImages.set(f, img);
+  // ---------------------------------------------------------------- LCD
+
+  private drawLcd(): void {
+    const g = this.game, s = this.lcd, c = s.ctx;
+    c.fillStyle = LCD_BG;
+    c.fillRect(0, 0, LCD_W, LCD_H);
+    drawPixelText(c, money(g.money), 2, 2, GOOD);
+    const clock = clockText(g.time);
+    const cx = LCD_W - 2 - pixelTextWidth(clock);
+    drawPixelText(c, clock, cx, 2, TEXT);
+    if (nightFactor(g.time) > 0.5) {
+      // Crescent moon.
+      c.fillStyle = '#dfe6f0';
+      c.fillRect(cx - 5, 2, 2, 1);
+      c.fillRect(cx - 6, 3, 1, 3);
+      c.fillRect(cx - 5, 6, 2, 1);
+    } else {
+      c.fillStyle = ACCENT;
+      c.fillRect(cx - 6, 3, 3, 3);
+      c.fillRect(cx - 5, 2, 1, 5);
+      c.fillRect(cx - 7, 4, 5, 1);
     }
-    if (img.version === f.version && now - img.at < 1) return img.canvas;
-    img.version = f.version;
-    img.at = now;
-    const ctx = img.canvas.getContext('2d')!;
-    const data = ctx.createImageData(f.cols, f.rows);
-    const col = new THREE.Color();
-    const base = Object.fromEntries(STATE_ORDER.map((st) => [st, new THREE.Color(TILE_COLORS[st])]));
-    const ripe = Object.fromEntries(CROP_IDS.map((id) => [id, new THREE.Color(CROPS[id].ripeColor).lerp(new THREE.Color('#ffe080'), 0.25)]));
-    for (let i = 0; i < f.size; i++) {
-      const st = f.state[i] as TileState;
-      if (st === TileState.Seeded) col.copy(SEEDED_FROM).lerp(SEEDED_TO, f.growth[i]);
-      else if (st === TileState.Ripe) col.copy(ripe[f.cropAt(i) ?? 'wheat']);
-      else col.copy(base[st]);
-      // Light checkerboard so individual tiles read on the map.
-      const k = ((i % f.cols) + Math.floor(i / f.cols)) % 2 ? 1 : 0.93;
-      data.data.set([col.r * 255 * k, col.g * 255 * k, col.b * 255 * k, 255], i * 4);
-    }
-    ctx.putImageData(data, 0, 0);
-    return img.canvas;
-  }
-
-  // ---------------------------------------------------------------- terminal
-
-  private drawTerminal(now: number): void {
-    const g = this.game, s = this.terminal, c = s.ctx;
-    const W = s.canvas.width, H = s.canvas.height;
-    c.fillStyle = BG;
-    c.fillRect(0, 0, W, H);
-
-    // Header: money and clock.
-    c.fillStyle = '#1b2a1c';
-    c.fillRect(0, 0, W, 54);
-    c.textAlign = 'left';
-    c.font = `800 32px ${FONT}`;
-    c.fillStyle = GOOD;
-    c.fillText(money(g.money), 14, 39);
-    c.textAlign = 'right';
-    c.font = `800 26px ${FONT}`;
-    c.fillStyle = TEXT;
-    c.fillText(clockText(g.time), W - 14, 37);
-    const night = nightFactor(g.time) > 0.5;
-    const ix = W - 108, iy = 27;
-    c.fillStyle = night ? '#dfe6f0' : '#ffd23a';
-    c.beginPath();
-    c.arc(ix, iy, 10, 0, Math.PI * 2);
-    c.fill();
-    if (night) {
-      c.fillStyle = '#1b2a1c';
-      c.beginPath();
-      c.arc(ix + 5, iy - 4, 9, 0, Math.PI * 2);
-      c.fill();
-    }
-
-    // Implement column.
+    c.fillStyle = '#1f3324';
+    c.fillRect(0, 8, LCD_W, 1);
     const imp = g.implement;
-    c.textAlign = 'left';
-    c.font = `800 23px ${FONT}`;
-    c.fillStyle = TEXT;
-    c.fillText(imp ? imp.name : 'No implement', 14, 88);
-    c.font = `700 17px ${FONT}`;
-    c.fillStyle = !imp ? DIM : g.lowered ? GOOD : DIM;
-    c.fillText(!imp ? 'Attach one at the garage' : g.lowered ? '▼ LOWERED — working' : '▲ Raised  [Space] lowers', 14, 114);
-    c.font = `600 13px ${FONT}`;
-    c.fillStyle = DIM;
-    c.fillText(g.tractorDef.name, 14, 134);
-
-    let y = 158;
-    if (imp?.kind === 'seeder') {
-      c.font = `700 12px ${FONT}`;
-      c.fillStyle = DIM;
-      c.fillText('SEED  [1] [2] [3]', 14, y);
-      CROP_IDS.forEach((id, i) => {
-        const x = 14 + i * 96, on = g.seedCrop === id;
-        roundRect(c, x, y + 8, 90, 42, 8, on ? ACCENT : '#243024');
-        c.fillStyle = on ? '#2a2a10' : TEXT;
-        c.font = `800 15px ${FONT}`;
-        c.fillText(`${i + 1} ${CROPS[id].name}`, x + 9, y + 27);
-        c.font = `600 12px ${FONT}`;
-        c.fillText(`$${CROPS[id].seedCostPerTile}/tile`, x + 9, y + 43);
-      });
-      y += 64;
-    }
-    if (showGrain(g)) {
-      const share = g.grain.amount / g.tractorDef.grainCapacity;
-      c.font = `700 12px ${FONT}`;
-      c.fillStyle = DIM;
-      c.fillText('GRAIN TANK', 14, y);
-      roundRect(c, 14, y + 8, 280, 14, 7, '#2a332b');
-      roundRect(c, 14, y + 8, Math.max(14, 280 * share), 14, 7, share > 0.95 ? '#e8453a' : '#e0c060');
-      c.font = `600 14px ${FONT}`;
-      c.fillStyle = TEXT;
-      c.fillText(grainText(g), 14, y + 42);
-    }
-
-    // Market column.
-    const mx = 318;
-    c.fillStyle = '#243024';
-    c.fillRect(mx - 12, 66, 2, 172);
-    c.font = `800 15px ${FONT}`;
-    c.fillStyle = ACCENT;
-    c.fillText('MARKET  $/L', mx, 86);
-    CROP_IDS.forEach((id, i) => {
-      const ry = 120 + i * 36, tr = priceTrend(id, g.time);
-      c.textAlign = 'left';
-      c.font = `600 17px ${FONT}`;
-      c.fillStyle = TEXT;
-      c.fillText(CROPS[id].name, mx, ry);
-      c.textAlign = 'right';
-      c.font = `800 17px ${FONT}`;
-      c.fillStyle = tr > 0 ? GOOD : tr < 0 ? WARN : TEXT;
-      c.fillText(`${g.price(id).toFixed(2)} ${tr > 0 ? '▲' : tr < 0 ? '▼' : '•'}`, W - 14, ry);
-    });
-
-    // Messages and the current action prompt.
-    c.textAlign = 'left';
-    c.fillStyle = '#243024';
-    c.fillRect(0, 246, W, 2);
-    const prompt = promptText(g);
-    const recent = g.messages.filter((m) => g.time - m.time < 6).slice(-2).reverse();
-    let my = 272;
-    const maxLines = prompt ? 3 : 5;
-    let lines = 0;
-    c.font = `600 16px ${FONT}`;
-    for (const m of recent) {
-      const wrapped = wrap(c, m.text, W - 40).slice(0, maxLines - lines);
-      if (!wrapped.length) break;
-      c.fillStyle = m.kind === 'good' ? GOOD : m.kind === 'warn' ? '#e8453a' : '#8ac';
-      c.fillRect(14, my - 15, 4, wrapped.length * 20);
-      c.fillStyle = TEXT;
-      for (const line of wrapped) {
-        c.fillText(line, 26, my);
-        my += 20;
-      }
-      my += 6;
-      lines += wrapped.length;
-    }
-    if (prompt) {
-      const pulse = 0.85 + 0.15 * Math.sin(now * 5);
-      c.globalAlpha = pulse;
-      roundRect(c, 12, H - 50, W - 24, 38, 19, ACCENT);
-      c.globalAlpha = 1;
-      c.textAlign = 'center';
-      c.font = `800 18px ${FONT}`;
-      c.fillStyle = '#2a2a10';
-      c.fillText(prompt, W / 2, H - 25);
+    if (!imp) {
+      drawPixelText(c, 'NO IMPLEMENT', 2, 9, DIM);
+    } else {
+      drawPixelText(c, imp.kind, 2, 9, '#c8d0c0');
+      const state = g.lowered ? '▼ DOWN' : '▲ UP';
+      drawPixelText(c, state, LCD_W - 2 - pixelTextWidth(state), 9, g.lowered ? GOOD : DIM);
     }
     s.commit();
   }
@@ -563,18 +321,6 @@ function lamp(c: CanvasRenderingContext2D, x: number, y: number, text: string, o
   c.fillText(text, x + 38, y + 14);
 }
 
-function legend(c: CanvasRenderingContext2D, x: number, y: number, items: [TileState, string][]): void {
-  c.textAlign = 'left';
-  c.font = `700 12px ${FONT}`;
-  for (const [st, text] of items) {
-    c.fillStyle = st === TileState.Seeded ? '#4fc184' : TILE_COLORS[st];
-    c.fillRect(x, y - 11, 13, 13);
-    c.fillStyle = TEXT;
-    c.fillText(text, x + 18, y);
-    x += 18 + c.measureText(text).width + 10;
-  }
-}
-
 function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number, h: number, r: number, fill: string): void {
   c.fillStyle = fill;
   c.beginPath();
@@ -582,16 +328,3 @@ function roundRect(c: CanvasRenderingContext2D, x: number, y: number, w: number,
   c.fill();
 }
 
-function wrap(c: CanvasRenderingContext2D, text: string, width: number): string[] {
-  const lines: string[] = [];
-  let line = '';
-  for (const word of text.split(' ')) {
-    const next = line ? `${line} ${word}` : word;
-    if (line && c.measureText(next).width > width) {
-      lines.push(line);
-      line = word;
-    } else line = next;
-  }
-  if (line) lines.push(line);
-  return lines;
-}

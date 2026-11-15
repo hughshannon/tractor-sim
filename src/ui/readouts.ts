@@ -78,3 +78,30 @@ export function fieldReport(g: Game): FieldReport | null {
 }
 
 export const percent = (share: number) => `${Math.round(share * 100)}%`;
+
+const ZONE_SHORT = { shed: 'SHOP', silo: 'SILO', fuel: 'FUEL' } as const;
+
+/**
+ * One-line GPS status: the current field's short name and how much of it the attached implement has done
+ * (plowed, seeded, or harvested). `done` is null when the implement has nothing to do there. Off a field,
+ * the name is the zone (SHOP/SILO/FUEL) or empty, and `onField` is false.
+ */
+export function fieldProgress(g: Game): { name: string; done: number | null; onField: boolean } {
+  const report = fieldReport(g);
+  if (!report) return { name: g.zone ? ZONE_SHORT[g.zone.id] : '', done: null, onField: false };
+  const f = report.field;
+  const c = f.counts();
+  const name = f.name.split(' ')[0].toUpperCase();
+  switch (g.implement?.kind) {
+    case 'plow':
+      return { name, done: (c[TileState.Plowed] + c[TileState.Seeded] + c[TileState.Ripe]) / f.size, onField: true };
+    case 'seeder':
+      return { name, done: (c[TileState.Seeded] + c[TileState.Ripe]) / f.size, onField: true };
+    case 'harvester': {
+      const crop = c[TileState.Ripe] + c[TileState.Stubble];
+      return { name, done: crop > 0 ? c[TileState.Stubble] / crop : null, onField: true };
+    }
+    default:
+      return { name, done: null, onField: true };
+  }
+}
