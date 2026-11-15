@@ -219,3 +219,45 @@ describe('multiple players', () => {
     expect(() => players.switchTo('   ')).toThrow();
   });
 });
+
+describe('moving a farm between browsers', () => {
+  it('imports an exported farm as a new player without touching other farms', () => {
+    const otherBrowser = new MemoryStorage();
+    const theirs = new FarmSaves(() => otherBrowser);
+    const game = theirs.load().game;
+    game.money = 777;
+    theirs.save(game);
+    const exported = otherBrowser.getItem(SAVE_KEY)!;
+
+    const storage = new MemoryStorage();
+    const mine = new FarmSaves(() => storage);
+    const myGame = mine.load().game;
+    myGame.money = 5;
+    mine.save(myGame);
+
+    const players = new Players(() => storage);
+    expect(players.importAs('Alex', exported)).toBe('Alex');
+    expect(players.current()).toBe('Alex');
+    expect(new FarmSaves(() => storage, 'Alex').load().game.money).toBe(777);
+    expect(new FarmSaves(() => storage).load().game.money).toBe(5);
+  });
+
+  it('rejects a bad file and backs up a farm it replaces', () => {
+    const storage = new MemoryStorage();
+    const players = new Players(() => storage);
+    const mine = new FarmSaves(() => storage);
+    const game = mine.load().game;
+    game.money = 5;
+    mine.save(game);
+    const before = storage.getItem(SAVE_KEY);
+
+    expect(() => players.importAs(DEFAULT_PLAYER, '{"nope":1}')).toThrow();
+    expect(storage.getItem(SAVE_KEY)).toBe(before);
+    expect(players.list()).toEqual([DEFAULT_PLAYER]);
+
+    game.money = 42;
+    players.importAs(DEFAULT_PLAYER, JSON.stringify(snapshot(game)));
+    expect(storage.getItem(BACKUP_KEY)).toBe(before);
+    expect(mine.load().game.money).toBe(42);
+  });
+});

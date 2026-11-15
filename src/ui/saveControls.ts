@@ -1,4 +1,4 @@
-import { FarmSaves, type LoadResult, type Players } from '../sim/save';
+import { FarmSaves, snapshot, type LoadResult, type Players } from '../sim/save';
 import { h } from './dom';
 
 /** Keeps browser-storage failures visible, not just in a disappearing toast. */
@@ -43,6 +43,45 @@ export function saveControls(root: HTMLElement, saves: FarmSaves, loaded: LoadRe
       h('option', { value: name, selected: name === saves.player ? 'selected' : undefined }, name))),
     h('button.btn.ghost', { onclick: () => switchPlayer(window.prompt('New player name:')) }, 'New player'),
   );
+  const canSave = loaded.status !== 'protected' && loaded.status !== 'unavailable';
+  const exportFarm = () => {
+    const blob = new Blob([JSON.stringify(snapshot(loaded.game))], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const link = h('a', { href: url, download: `tractor-farm-${saves.player.replace(/[^\w-]+/g, '_')}.json` });
+    link.click();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+    status.textContent = 'Farm exported. Open Import farm in the other browser and pick this file.';
+  };
+  const importFile = async (file: File | undefined) => {
+    if (!file || !players) return;
+    const raw = await file.text();
+    const name = window.prompt('Import this farm as which player? (Use a new name to keep every existing farm.)', 'Imported farmer')?.trim();
+    if (!name) return;
+    if (players.list().includes(name)
+      && !window.confirm(`Replace ${name}'s farm with the imported one? Their current farm will be kept as a backup.`)) return;
+    try {
+      save();
+      reloading = true;
+      players.importAs(name, raw);
+      window.location.reload();
+    } catch {
+      reloading = false;
+      status.textContent = 'That file is not a valid farm save. Nothing was changed.';
+    }
+  };
+  const fileInput = h('input', {
+    type: 'file', accept: '.json,application/json', hidden: true,
+    onchange: (e: Event) => {
+      const input = e.target as HTMLInputElement;
+      void importFile(input.files?.[0]);
+      input.value = '';
+    },
+  });
+  const transferRow = players && h('div.row.player-row', {},
+    h('button.btn.ghost', { onclick: exportFarm, disabled: !canSave }, 'Export farm'),
+    h('button.btn.ghost', { onclick: () => fileInput.click() }, 'Import farm'),
+    fileInput,
+  );
   root.append(h('div.panel.save-controls', {},
     h('div.row', {},
       h('button.btn.ghost', { onclick: save, disabled: loaded.status === 'protected' || loaded.status === 'unavailable' }, 'Save farm'),
@@ -50,6 +89,7 @@ export function saveControls(root: HTMLElement, saves: FarmSaves, loaded: LoadRe
     ),
     status,
     playerRow ?? null,
+    transferRow ?? null,
   ));
   window.setInterval(save, 5000);
   document.addEventListener('visibilitychange', () => {

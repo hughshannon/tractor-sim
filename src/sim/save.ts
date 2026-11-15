@@ -185,6 +185,23 @@ export class FarmSaves {
   }
 }
 
+/**
+ * Writes a farm exported from another browser into a player's slot.
+ * Validates first, and backs up any farm it replaces.
+ */
+export function importFarm(storage: StorageAccess, player: string, raw: string): void {
+  decodeSave(raw);
+  const previous = storage.getItem(saveKey(player));
+  if (previous !== null) storage.setItem(backupKey(player), previous);
+  storage.setItem(saveKey(player), raw);
+}
+
+function cleanName(rawName: string): string {
+  const name = rawName.trim().slice(0, 24);
+  if (!name) throw new Error('Player name is empty.');
+  return name;
+}
+
 /** Who is playing in this browser. Each player has their own farm save. */
 export class Players {
   constructor(private storage: () => StorageAccess) {}
@@ -205,11 +222,17 @@ export class Players {
 
   /** Adds the player if new and makes them current. Returns the cleaned-up name. */
   switchTo(rawName: string): string {
-    const name = rawName.trim().slice(0, 24);
-    if (!name) throw new Error('Player name is empty.');
+    const name = cleanName(rawName);
     const players = this.list();
     if (!players.includes(name)) this.storage().setItem(PLAYERS_KEY, JSON.stringify([...players, name]));
     this.storage().setItem(CURRENT_PLAYER_KEY, name);
     return name;
+  }
+
+  /** Loads an exported farm into a player's slot (validated, with backup) and makes them current. */
+  importAs(rawName: string, raw: string): string {
+    const name = cleanName(rawName);
+    importFarm(this.storage(), name, raw);
+    return this.switchTo(name);
   }
 }
