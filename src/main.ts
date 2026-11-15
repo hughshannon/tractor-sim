@@ -41,9 +41,11 @@ const instruments = new CabInstruments(game, EYE, renderer.capabilities.getMaxAn
 tractorView.cab.add(instruments.group);
 
 const input = new Input();
-const hud = new Hud(uiRoot, game);
+const saving = saveControls(saves, loaded, (message) => game.notify(message, 'warn', 0));
+const hud = new Hud(uiRoot, game, () => saving.startFresh());
 const shop = new Shop(uiRoot, game, () => (input.enabled = true));
-saveControls(uiRoot, saves, loaded);
+// Storage problems need to be seen once; normal saving happens silently in the background.
+if (loaded.status === 'protected' || loaded.status === 'unavailable') game.notify(loaded.message, 'warn', 0);
 if (loaded.status === 'loaded') hud.toggleHelp(false);
 
 const sound = new SoundEngine();

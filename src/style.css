@@ -95,9 +95,7 @@ body { font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: 
 }
 .mute-btn:hover { background: rgba(48, 60, 40, 0.9); }
 
-.save-controls { left: 12px; top: 168px; width: 210px; }
-.save-controls .btn { padding: 5px 8px; font-size: 12px; }
-.save-status { margin-top: 7px; font-size: 12px; color: #dedbcd; }
+.help-actions { display: flex; gap: 10px; justify-content: center; margin-top: 4px; }
 
 /* Cab view: the dashboard instruments take over from the screen HUD. */
 .cab-mode .stats, .cab-mode .market, .cab-mode .implement, .cab-mode .field-info,

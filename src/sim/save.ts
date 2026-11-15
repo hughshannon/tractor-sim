@@ -151,7 +151,7 @@ export class FarmSaves {
       } catch {
         return {
           game: new Game(), status: 'protected',
-          message: 'Saved farm could not be loaded. It is untouched; autosave is off. Use New farm to replace it with a backup.',
+          message: 'Saved farm could not be loaded. It is untouched; autosave is off. Use New farm on the help screen (H) to replace it with a backup.',
         };
       }
     }

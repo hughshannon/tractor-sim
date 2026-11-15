@@ -2,17 +2,6 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { FarmSaves, SAVE_KEY } from '../src/sim/save';
 import { saveControls } from '../src/ui/saveControls';
 
-// These controls only need standard DOM events and append/setAttribute.
-class Element extends EventTarget {
-  className = '';
-  textContent = '';
-  disabled = false;
-  children: (Element | string)[] = [];
-  append(...children: (Element | string)[]) { this.children.push(...children); }
-  setAttribute() {}
-  click() { if (!this.disabled) this.dispatchEvent(new Event('click')); }
-}
-
 function setup() {
   const values = new Map<string, string>();
   const storage = {
@@ -36,28 +25,24 @@ function setup() {
   }));
   vi.stubGlobal('document', Object.assign(documentEvents, {
     visibilityState: 'hidden',
-    createElement: () => new Element(),
   }));
-  const root = new Element();
-  saveControls(root as unknown as HTMLElement, saves, loaded);
-  const panel = root.children[0] as Element;
-  const row = panel.children[0] as Element;
+  const warn = vi.fn();
+  const controls = saveControls(saves, loaded, warn);
   return {
-    loaded, values, storage, confirm, reload, windowEvents, documentEvents,
+    loaded, values, storage, confirm, reload, windowEvents, documentEvents, warn,
     interval: () => interval(),
-    saveButton: row.children[0] as Element,
-    newButton: row.children[1] as Element,
-    status: panel.children[1] as Element,
+    save: () => controls.save(),
+    startFresh: () => controls.startFresh(),
   };
 }
 
 afterEach(() => vi.unstubAllGlobals());
 
-describe('save controls', () => {
+describe('autosave', () => {
   it('saves manually, periodically, when hidden, and when leaving the page', () => {
     const env = setup();
     env.loaded.game.money = 1000;
-    env.saveButton.click();
+    env.save();
     expect(JSON.parse(env.values.get(SAVE_KEY)!).money).toBe(1000);
     env.loaded.game.money = 1100;
     env.interval();
@@ -73,9 +58,9 @@ describe('save controls', () => {
   it('does not touch the current save or game when a fresh start is cancelled', () => {
     const env = setup();
     env.loaded.game.money = 1000;
-    env.saveButton.click();
+    env.save();
     const previous = env.values.get(SAVE_KEY);
-    env.newButton.click();
+    env.startFresh();
     expect(env.confirm).toHaveBeenCalledOnce();
     expect(env.values.get(SAVE_KEY)).toBe(previous);
     expect(env.loaded.game.money).toBe(1000);
@@ -85,28 +70,40 @@ describe('save controls', () => {
   it('keeps the fresh save intact through lifecycle events during reload', () => {
     const env = setup();
     env.loaded.game.money = 1000;
-    env.saveButton.click();
+    env.save();
     env.confirm.mockReturnValue(true);
-    env.newButton.click();
+    env.startFresh();
     expect(env.reload).toHaveBeenCalledOnce();
     env.windowEvents.dispatchEvent(new Event('pagehide'));
     env.interval();
     expect(JSON.parse(env.values.get(SAVE_KEY)!).money).toBe(3000);
   });
 
-  it('shows a persistent error and keeps playing if saving fails', () => {
+  it('warns once when saving fails, keeps the previous save, and keeps playing', () => {
     const env = setup();
-    env.saveButton.click();
+    env.save();
     const previous = env.values.get(SAVE_KEY);
     env.storage.setItem.mockImplementation(() => { throw new Error('Full'); });
     env.loaded.game.money = 100;
-    env.saveButton.click();
-    expect(env.status.textContent).toContain('Save failed');
+    env.save();
+    env.interval();
+    expect(env.warn).toHaveBeenCalledOnce();
+    expect(env.warn.mock.calls[0][0]).toContain('Save failed');
     expect(env.values.get(SAVE_KEY)).toBe(previous);
     env.confirm.mockReturnValue(true);
-    env.newButton.click();
-    expect(env.status.textContent).toContain('Could not start a new farm');
+    env.startFresh();
+    expect(env.warn).toHaveBeenLastCalledWith(expect.stringContaining('Could not start a new farm'));
     expect(env.reload).not.toHaveBeenCalled();
     expect(env.loaded.game.money).toBe(100);
+  });
+
+  it('warns again if saving fails after recovering', () => {
+    const env = setup();
+    env.storage.setItem.mockImplementationOnce(() => { throw new Error('Full'); });
+    env.save();
+    env.save();
+    env.storage.setItem.mockImplementationOnce(() => { throw new Error('Full'); });
+    env.save();
+    expect(env.warn).toHaveBeenCalledTimes(2);
   });
 });

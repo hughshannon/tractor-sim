@@ -33,7 +33,7 @@ export class Hud {
   private shownMessages = new WeakSet<object>();
   private slowTimer = 0;
 
-  constructor(private root: HTMLElement, private game: Game) {
+  constructor(private root: HTMLElement, private game: Game, onNewFarm: () => void) {
     const stats = h('div.panel.stats', {},
       h('div.row', {}, this.moneyEl, this.clockEl), this.tractorEl,
       h('div.row', {}, h('span.label', {}, 'Fuel'), this.fuel.el, this.fuelText),
@@ -59,7 +59,11 @@ export class Hud {
         ].map(([k, v]) => h('tr', {}, h('td.key', {}, k), h('td', {}, v))),
       ),
       h('p.dim', {}, 'Cycle: harvest → plow → seed → wait → harvest. Swap implements at the garage.'),
-      h('button.btn', { onclick: () => this.toggleHelp(false) }, 'Start farming'),
+      h('div.help-actions', {},
+        h('button.btn', { onclick: () => this.toggleHelp(false) }, 'Start farming'),
+        h('button.btn.ghost', { onclick: onNewFarm, title: 'Replace this farm with a fresh one (the old save is kept as a backup)' }, 'New farm'),
+      ),
+      h('p.dim', {}, 'Your farm saves automatically in this browser.'),
     );
     root.append(stats, this.market, imp, this.fieldEl, this.prompt, this.toasts, this.help);
   }
