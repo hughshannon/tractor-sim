@@ -42,6 +42,8 @@ export class TractorView {
   readonly eye = new THREE.Object3D();
   /** Headlights, work lights and tail lights; switched on at dusk. */
   readonly lamps = new Lamps();
+  /** Headlight haze cone; hidden in the cab view, where the camera sits inside it. */
+  private beam: THREE.Mesh | null = null;
 
   constructor() {
     this.paint = new THREE.MeshLambertMaterial({ color: 0xc8302a, flatShading: true });
@@ -171,6 +173,11 @@ export class TractorView {
     beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, -1.45, 13.8).normalize());
     beam.renderOrder = 2;
     b.add(beam);
+    this.beam = beam;
+  }
+
+  showBeam(show: boolean): void {
+    if (this.beam) this.beam.visible = show;
   }
 
   setColor(hex: number): void {

@@ -105,6 +105,7 @@ function frame(now: number) {
   lampLevel += ((lampsOn(game.time) ? 1 : 0) - lampLevel) * Math.min(1, dt * 1.5);
   farmLamps.set(lampLevel);
   tractorView.lamps.set(lampLevel);
+  tractorView.showBeam(rig.mode !== 'cab');
   hud.update(dt);
 
   const speed = Math.abs(t.speed);

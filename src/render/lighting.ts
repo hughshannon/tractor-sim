@@ -138,7 +138,7 @@ export class DayNight {
     this.sun.position.set(focus.x + dir.x * 85, dir.y * 85, focus.z + dir.z * 85);
     this.sun.target.position.set(focus.x, 0, focus.z);
     if (up) {
-      this.sun.intensity = 2.2 * Math.min(1, s / 0.2) ** 0.8;
+      this.sun.intensity = 2.2 * Math.min(1, Math.max(0, s) / 0.2) ** 0.8;
       this.sun.color.lerpColors(SUN_LOW, SUN_NOON, Math.min(1, s / 0.4));
     } else {
       this.sun.intensity = 0.35 * Math.min(1, -s / 0.2);

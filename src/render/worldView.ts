@@ -210,11 +210,13 @@ function buildFieldLights(scene: THREE.Scene, fields: Field[], lamps: Lamps): vo
   for (const f of fields) {
     const x0 = f.x - FIELD_LIGHT_INSET, z0 = f.z - FIELD_LIGHT_INSET;
     const x1 = f.x + f.width + FIELD_LIGHT_INSET, z1 = f.z + f.depth + FIELD_LIGHT_INSET;
-    const nx = Math.max(1, Math.round((x1 - x0) / FIELD_LIGHT_SPACING));
-    const nz = Math.max(1, Math.round((z1 - z0) / FIELD_LIGHT_SPACING));
-    // Skip the first corner: the field sign stands there.
-    for (let i = 1; i <= nx; i++) points.push([x0 + ((x1 - x0) * i) / nx, z0], [x1 - ((x1 - x0) * i) / nx, z1]);
-    for (let i = 1; i < nz; i++) points.push([x0, z1 - ((z1 - z0) * i) / nz], [x1, z0 + ((z1 - z0) * i) / nz]);
+    const corners: [number, number][] = [[x0, z0], [x1, z0], [x1, z1], [x0, z1], [x0, z0]];
+    // Walk each edge, excluding its start point; the final edge also stops short of (x0, z0) where the sign stands.
+    for (let e = 0; e < 4; e++) {
+      const [ax, az] = corners[e], [bx, bz] = corners[e + 1];
+      const n = Math.max(1, Math.round(Math.hypot(bx - ax, bz - az) / FIELD_LIGHT_SPACING));
+      for (let i = 1; i <= (e === 3 ? n - 1 : n); i++) points.push([ax + ((bx - ax) * i) / n, az + ((bz - az) * i) / n]);
+    }
   }
   const n = points.length;
   const housings = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.14, 0.18, 0.12, 8), mat(0x3a3d40), n);
