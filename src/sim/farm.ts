@@ -24,6 +24,23 @@ export const BUILDINGS: Building[] = [
   { kind: 'pump', box: { minX: -1, minZ: -12, maxX: 1, maxZ: -11 } },
 ];
 
+/** Gravel yard and dirt tracks: centre x/z and size in metres. */
+export interface Track {
+  x: number;
+  z: number;
+  w: number;
+  d: number;
+  yard?: boolean;
+}
+
+export const TRACKS: Track[] = [
+  { x: 0, z: -6, w: 50, d: 22, yard: true },
+  { x: 0, z: 7, w: 6, d: 14 },
+  { x: -5, z: 10, w: 150, d: 5 },
+  { x: -20, z: 56, w: 5, d: 12 },
+  { x: 44, z: 10, w: 5, d: 8 },
+];
+
 export const ZONES: Zone[] = [
   { id: 'shed', x: -15, z: -2, radius: 4.5, label: 'GARAGE & SHOP' },
   { id: 'silo', x: 15, z: -2, radius: 4.5, label: 'SELL GRAIN' },

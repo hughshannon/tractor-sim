@@ -14,6 +14,7 @@ const DEFAULT_FOV = 50;
 const DEFAULT_NEAR = 0.5;
 const CAB_FOV = 72;
 const CAB_NEAR = 0.05;
+const CAB_MIN_FOV = 30;
 /** Slight downward tilt so the hood and implement are in view. */
 const CAB_PITCH = -0.12;
 const MAX_LOOK_YAW = 2.2;
@@ -35,13 +36,17 @@ export class CameraRig {
   private lookPitch = 0;
   private dragging = false;
   private tmp = new THREE.Vector3();
+  private cabFov = CAB_FOV;
 
   constructor(private camera: THREE.PerspectiveCamera, dom: HTMLElement) {
     dom.addEventListener(
       'wheel',
       (e) => {
         e.preventDefault();
-        this.zoom = Math.max(0.5, Math.min(2.5, this.zoom * (e.deltaY > 0 ? 1.1 : 0.9)));
+        const k = e.deltaY > 0 ? 1.1 : 0.9;
+        // In the cab the wheel narrows the field of view, e.g. to read the screens.
+        if (this.mode === 'cab') this.cabFov = clamp(this.cabFov * k, CAB_MIN_FOV, CAB_FOV);
+        else this.zoom = clamp(this.zoom * k, 0.5, 2.5);
       },
       { passive: false },
     );
@@ -77,7 +82,7 @@ export class CameraRig {
 
   update(t: TractorState, dt: number): void {
     const cab = this.mode === 'cab' && this.eye !== null;
-    this.setLens(cab ? CAB_FOV : DEFAULT_FOV, cab ? CAB_NEAR : DEFAULT_NEAR);
+    this.setLens(cab ? this.cabFov : DEFAULT_FOV, cab ? CAB_NEAR : DEFAULT_NEAR);
 
     // Follow heading lazily; when reversing keep the camera behind the tractor's nose direction.
     let dy = t.heading - this.yaw;

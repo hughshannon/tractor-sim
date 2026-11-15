@@ -20,10 +20,15 @@ npm run dev        # http://localhost:5000
 | E | Interact: garage & shop, sell grain at silo, refuel |
 | 1 2 3 | Choose seed (wheat, corn, canola) |
 | C | Cycle camera: chase / cab (first-person) / overhead |
-| Mouse wheel | Zoom |
+| Mouse wheel | Zoom (in the cab view: narrow the view to read the screens) |
 | Mouse drag | Look around (cab view) |
 | M | Mute / unmute sound |
 | H | Help |
+
+**Cab view:** in the first-person cab view the screen HUD is replaced by working instruments: a speedometer,
+fuel and grain-tank gauges with warning lamps behind the wheel, a GPS screen with a heading-up map of the farm
+coloured by tile state (unworked, plowed, growing, ripe, harvested stubble) and a farm terminal with money, clock,
+implement, seed choice, market prices and prompts. Drag to look around; scroll to narrow the view to read them.
 
 **Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → wait for growth → harvest again.
 Swap implements (plow, seeder, harvester) at the garage. Prices drift over time, so check the market panel before selling.

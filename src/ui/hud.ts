@@ -1,17 +1,11 @@
 import { CROPS, CROP_IDS } from '../sim/crops';
-import { TileState } from '../sim/field';
 import { clockText, nightFactor } from '../sim/daylight';
-import { FUEL_PRICE, Game } from '../sim/game';
+import { Game } from '../sim/game';
 import { priceTrend } from '../sim/market';
 import { h, money } from './dom';
-
-const STATE_NAMES: Record<TileState, string> = {
-  [TileState.Grass]: 'Grass',
-  [TileState.Plowed]: 'Plowed',
-  [TileState.Seeded]: 'Growing',
-  [TileState.Ripe]: 'Ripe',
-  [TileState.Stubble]: 'Stubble',
-};
+import {
+  STATE_NAMES, fieldReport, grainText, implementStateText, percent, promptText, reversing, showGrain, speedKmh,
+} from './readouts';
 
 function bar(cls: string): { el: HTMLElement; fill: HTMLElement } {
   const fill = h('div.fill');
@@ -39,7 +33,7 @@ export class Hud {
   private shownMessages = new WeakSet<object>();
   private slowTimer = 0;
 
-  constructor(root: HTMLElement, private game: Game) {
+  constructor(private root: HTMLElement, private game: Game) {
     const stats = h('div.panel.stats', {},
       h('div.row', {}, this.moneyEl, this.clockEl), this.tractorEl,
       h('div.row', {}, h('span.label', {}, 'Fuel'), this.fuel.el, this.fuelText),
@@ -59,7 +53,7 @@ export class Hud {
           ['1 2 3', 'Choose seed: wheat, corn, canola'],
           ['C', 'Camera: chase / cab / overhead'],
           ['M', 'Mute / unmute sound'],
-          ['Mouse wheel', 'Zoom'],
+          ['Mouse wheel', 'Zoom (in the cab: narrow the view to read the screens)'],
           ['Mouse drag', 'Look around (cab view)'],
           ['H', 'Show / hide this help'],
         ].map(([k, v]) => h('tr', {}, h('td.key', {}, k), h('td', {}, v))),
@@ -68,6 +62,11 @@ export class Hud {
       h('button.btn', { onclick: () => this.toggleHelp(false) }, 'Start farming'),
     );
     root.append(stats, this.market, imp, this.fieldEl, this.prompt, this.toasts, this.help);
+  }
+
+  /** In the cab view the in-cab instruments replace the screen HUD (help, shop and save controls stay). */
+  setCabMode(on: boolean): void {
+    this.root.classList.toggle('cab-mode', on);
   }
 
   get helpVisible(): boolean {
@@ -88,24 +87,20 @@ export class Hud {
     this.fuel.fill.style.width = `${fuelPct * 100}%`;
     this.fuel.el.classList.toggle('low', fuelPct < 0.15);
     this.fuelText.textContent = `${Math.round(g.fuel)} L`;
-    this.speedEl.textContent = `${Math.round(Math.abs(g.tractor.speed) * 3.6)} km/h${g.tractor.speed < -0.1 ? ' (R)' : ''}`;
+    this.speedEl.textContent = `${speedKmh(g)} km/h${reversing(g) ? ' (R)' : ''}`;
 
     const imp = g.implement;
     this.impName.textContent = imp ? imp.name : 'No implement';
-    this.impState.textContent = imp ? (g.lowered ? '▼ LOWERED — working' : '▲ Raised  [Space] to lower') : 'Attach one at the garage';
+    this.impState.textContent = implementStateText(g);
     this.impState.classList.toggle('on', g.lowered);
     this.seedRow.style.display = imp?.kind === 'seeder' ? '' : 'none';
-    this.grainWrap.style.display = imp?.kind === 'harvester' || g.grain.amount > 0 ? '' : 'none';
+    this.grainWrap.style.display = showGrain(g) ? '' : 'none';
     const cap = def.grainCapacity;
     this.grain.fill.style.width = `${(g.grain.amount / cap) * 100}%`;
     this.grain.el.classList.toggle('full', g.grain.amount >= cap - 15);
-    this.grainText.textContent = `${g.grain.amount} / ${cap} L${g.grain.crop ? ' ' + CROPS[g.grain.crop].name : ''}`;
+    this.grainText.textContent = grainText(g);
 
-    const zone = g.zone;
-    let prompt = '';
-    if (zone?.id === 'shed') prompt = 'Press E to open the garage & shop';
-    else if (zone?.id === 'silo') prompt = g.grain.amount > 0 ? `Press E to sell ${g.grain.amount} L` : 'Silo: bring grain here to sell';
-    else if (zone?.id === 'fuel') prompt = `Press E to refuel ($${Math.ceil((def.fuelCapacity - g.fuel) * FUEL_PRICE)})`;
+    const prompt = promptText(g);
     this.prompt.textContent = prompt;
     this.prompt.style.display = prompt ? '' : 'none';
 
@@ -145,28 +140,17 @@ export class Hud {
       ),
     );
 
-    const p = g.implementPos();
-    const f = g.fieldAt(g.tractor.x, g.tractor.z) ?? g.fieldAt(p.x, p.z);
-    if (!f) {
+    const report = fieldReport(g);
+    if (!report) {
       this.fieldEl.style.display = 'none';
       return;
     }
     this.fieldEl.style.display = '';
-    const c = f.counts();
-    const pct = (n: number) => `${Math.round((n / f.size) * 100)}%`;
-    const ti = f.tileAt(p.x, p.z);
-    let tileText = '';
-    if (ti >= 0) {
-      const s = f.state[ti] as TileState;
-      const crop = f.cropAt(ti);
-      tileText = STATE_NAMES[s] + (crop ? ` ${CROPS[crop].name}` : '') + (s === TileState.Seeded ? ` ${Math.round(f.growth[ti] * 100)}%` : '');
-    }
+    const f = report.field;
     this.fieldEl.replaceChildren(
       h('div.title', {}, `${f.name}${f.owned ? '' : ' (not owned)'}`),
-      ...([TileState.Ripe, TileState.Seeded, TileState.Plowed, TileState.Stubble, TileState.Grass] as TileState[])
-        .filter((s) => c[s] > 0)
-        .map((s) => h('div.row', {}, h('span', {}, STATE_NAMES[s]), h('span', {}, pct(c[s])))),
-      ...(tileText ? [h('div.dim', {}, `Under implement: ${tileText}`)] : []),
+      ...report.coverage.map(({ state, share }) => h('div.row', {}, h('span', {}, STATE_NAMES[state]), h('span', {}, percent(share)))),
+      ...(report.underImplement ? [h('div.dim', {}, `Under implement: ${report.underImplement}`)] : []),
     );
   }
 }

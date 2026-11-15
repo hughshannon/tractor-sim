@@ -1,11 +1,12 @@
 import './style.css';
 import { SoundEngine } from './audio/sound';
 import { Input } from './core/input';
+import { CabInstruments } from './render/cabInstruments';
 import { CAMERA_MODE_NAMES, CameraRig } from './render/cameraRig';
 import { FieldView } from './render/fieldView';
 import { DayNight, Lamps } from './render/lighting';
 import { createScene } from './render/scene';
-import { TractorView } from './render/tractorView';
+import { EYE, TractorView } from './render/tractorView';
 import { buildWorld } from './render/worldView';
 import { CROP_IDS } from './sim/crops';
 import { lampsOn } from './sim/daylight';
@@ -36,6 +37,8 @@ const tractorView = new TractorView();
 scene.add(tractorView.root);
 const rig = new CameraRig(camera, renderer.domElement);
 rig.setCabAnchor(tractorView.eye);
+const instruments = new CabInstruments(game, EYE, renderer.capabilities.getMaxAnisotropy());
+tractorView.cab.add(instruments.group);
 
 const input = new Input();
 const hud = new Hud(uiRoot, game);
@@ -106,7 +109,11 @@ function frame(now: number) {
   farmLamps.set(lampLevel);
   tractorView.lamps.set(lampLevel);
   tractorView.showBeam(rig.mode !== 'cab');
+  const inCab = rig.mode === 'cab';
+  hud.setCabMode(inCab);
   hud.update(dt);
+  // The screens are only legible from the seat, so skip redrawing them from outside.
+  if (inCab) instruments.update(now / 1000);
 
   const speed = Math.abs(t.speed);
   const throttle = paused() ? 0 : Math.abs(drive.throttle);

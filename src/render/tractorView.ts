@@ -6,6 +6,8 @@ import { box, cyl, mat } from './util';
 
 const REAR_R = 0.85;
 const FRONT_R = 0.5;
+/** Driver's eye position in tractor body space (+Z forward, +X to the driver's left). */
+export const EYE = new THREE.Vector3(0, 2.45, -0.8);
 
 function wheel(r: number, w: number): THREE.Group {
   const g = new THREE.Group();
@@ -40,6 +42,8 @@ export class TractorView {
   private steeringWheel = new THREE.Group();
   /** Driver's eye position, used by the cab camera. Parented to the body so it shares the engine shake. */
   readonly eye = new THREE.Object3D();
+  /** Mount for cab instruments, in body space. */
+  readonly cab = new THREE.Group();
   /** Headlights, work lights and tail lights; switched on at dusk. */
   readonly lamps = new Lamps();
   /** Headlight haze cone; hidden in the cab view, where the camera sits inside it. */
@@ -71,14 +75,8 @@ export class TractorView {
     b.add(painted(1.5, 0.14, 1.7, 0, 2.95, -0.75));
     b.add(box(0.5, 0.5, 0.5, 0x3a3a3a, 0, 1.65, -0.6)); // seat
     b.add(box(0.5, 0.6, 0.12, 0x3a3a3a, 0, 2.1, -0.86)); // seat back
-    // Dashboard, gauges and steering wheel (seen from the cab view).
+    // Dashboard and steering wheel; the working instruments are added to `cab` (see CabInstruments).
     b.add(box(1.1, 0.3, 0.3, 0x2a2a2a, 0, 1.75, -0.2));
-    for (const x of [-0.3, 0.3]) {
-      const gauge = cyl(0.07, 0.07, 0.02, 0xf2f2f2, 12);
-      gauge.rotation.x = -0.6; // face the driver
-      gauge.position.set(x, 1.91, -0.26);
-      b.add(gauge);
-    }
     const tilt = new THREE.Group();
     tilt.position.set(0, 2.06, -0.36);
     tilt.rotation.x = 0.66; // lean the wheel back toward the driver
@@ -91,13 +89,14 @@ export class TractorView {
     for (let i = 0; i < 3; i++) {
       const spoke = box(0.03, 0.19, 0.02, 0x1c1c1c);
       spoke.geometry.translate(0, 0.095, 0);
-      spoke.rotation.z = (i / 3) * Math.PI * 2;
+      // Spokes swept down (Y-shape) keep the upper wheel clear to read the instrument cluster.
+      spoke.rotation.z = Math.PI + (i - 1) * 2.1;
       this.steeringWheel.add(spoke);
     }
     tilt.add(this.steeringWheel);
     b.add(tilt);
-    this.eye.position.set(0, 2.45, -0.8);
-    b.add(this.eye);
+    this.eye.position.copy(EYE);
+    b.add(this.eye, this.cab);
     // Exhaust.
     this.exhaust = cyl(0.07, 0.07, 1.1, 0x333333, 6);
     this.exhaust.position.set(0.45, 2.2, 1.75);

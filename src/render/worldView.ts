@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { BUILDINGS, WORLD_HALF, ZONES, type Building } from '../sim/farm';
+import { BUILDINGS, TRACKS, WORLD_HALF, ZONES, type Building } from '../sim/farm';
 import type { Field } from '../sim/field';
 import { Lamps, glowMaterial, glowTexture } from './lighting';
 import { box, cyl, hash, labelSprite, mat } from './util';
@@ -32,11 +32,7 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
     m.receiveShadow = true;
     scene.add(m);
   };
-  dirt(50, 22, 0, -6, 0xb09c72);
-  dirt(6, 14, 0, 7);
-  dirt(150, 5, -5, 10);
-  dirt(5, 12, -20, 56);
-  dirt(5, 8, 44, 10);
+  for (const t of TRACKS) dirt(t.w, t.d, t.x, t.z, t.yard ? 0xb09c72 : undefined);
 
   // Trees on the outskirts, avoiding fields and the yard.
   const trunks: THREE.Matrix4[] = [];
