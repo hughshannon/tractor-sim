@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/sim/game';
 import { NO_CROP, TileState } from '../src/sim/field';
-import { BACKUP_KEY, decodeSave, FarmSaves, SAVE_KEY, snapshot } from '../src/sim/save';
+import { BACKUP_KEY, decodeSave, DEFAULT_PLAYER, FarmSaves, Players, SAVE_KEY, snapshot } from '../src/sim/save';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -179,5 +179,43 @@ describe('browser farm storage', () => {
     saves.startFresh();
     expect(storage.getItem(BACKUP_KEY)).toBe('incompatible save');
     expect(saves.load().status).toBe('loaded');
+  });
+});
+
+describe('multiple players', () => {
+  it('keeps a separate farm per player and leaves the original save with the first player', () => {
+    const storage = new MemoryStorage();
+    const first = new FarmSaves(() => storage);
+    const game = first.load().game;
+    game.money = 1234;
+    first.save(game);
+
+    const players = new Players(() => storage);
+    expect(players.current()).toBe(DEFAULT_PLAYER);
+    expect(players.switchTo('  Sam ')).toBe('Sam');
+    expect(players.list()).toEqual([DEFAULT_PLAYER, 'Sam']);
+    expect(players.current()).toBe('Sam');
+
+    const sam = new FarmSaves(() => storage, players.current());
+    const samLoad = sam.load();
+    expect(samLoad.status).toBe('new');
+    samLoad.game.money = 99;
+    sam.save(samLoad.game);
+    sam.startFresh();
+
+    expect(new FarmSaves(() => storage).load().game.money).toBe(1234);
+    expect(JSON.parse(storage.getItem(SAVE_KEY)!).money).toBe(1234);
+    expect(storage.getItem(BACKUP_KEY)).toBeNull();
+    expect(new FarmSaves(() => storage, 'Sam').load().game.money).toBe(3000);
+  });
+
+  it('falls back to the first player when the player list is missing or damaged', () => {
+    const storage = new MemoryStorage();
+    storage.setItem('tractor-farm.players', 'not json');
+    storage.setItem('tractor-farm.player', 'Ghost');
+    const players = new Players(() => storage);
+    expect(players.list()).toEqual([DEFAULT_PLAYER]);
+    expect(players.current()).toBe(DEFAULT_PLAYER);
+    expect(() => players.switchTo('   ')).toThrow();
   });
 });

@@ -7,6 +7,13 @@ import { Game } from './game';
 export const SAVE_KEY = 'tractor-farm.save';
 export const BACKUP_KEY = 'tractor-farm.previous-save';
 export const SAVE_VERSION = 1;
+export const PLAYERS_KEY = 'tractor-farm.players';
+export const CURRENT_PLAYER_KEY = 'tractor-farm.player';
+/** The first player keeps the original keys, so existing farms load unchanged. */
+export const DEFAULT_PLAYER = 'Farmer 1';
+
+export const saveKey = (player: string) => (player === DEFAULT_PLAYER ? SAVE_KEY : `${SAVE_KEY}:${player}`);
+export const backupKey = (player: string) => (player === DEFAULT_PLAYER ? BACKUP_KEY : `${BACKUP_KEY}:${player}`);
 
 /** Only simulation state belongs in a save; definitions and effects stay in code. */
 export function snapshot(game: Game) {
@@ -133,13 +140,13 @@ export type LoadResult = { game: Game; status: 'loaded' | 'new' | 'protected' | 
 export class FarmSaves {
   private writable = false;
 
-  constructor(private storage: () => StorageAccess) {}
+  constructor(private storage: () => StorageAccess, readonly player = DEFAULT_PLAYER) {}
 
   load(): LoadResult {
     this.writable = false;
     let raw: string | null;
     try {
-      raw = this.storage().getItem(SAVE_KEY);
+      raw = this.storage().getItem(saveKey(this.player));
     } catch {
       return { game: new Game(), status: 'unavailable', message: 'Browser storage is unavailable. Progress cannot be saved.' };
     }
@@ -164,16 +171,45 @@ export class FarmSaves {
     const raw = JSON.stringify(snapshot(game));
     decodeSave(raw);
     // setItem is atomic: a quota failure leaves the previous save intact.
-    this.storage().setItem(SAVE_KEY, raw);
+    this.storage().setItem(saveKey(this.player), raw);
   }
 
   /** Call only after confirmation. Back up first; never delete a save to reset it. */
   startFresh(): void {
     const storage = this.storage();
-    const previous = storage.getItem(SAVE_KEY);
-    if (previous !== null) storage.setItem(BACKUP_KEY, previous);
-    storage.setItem(SAVE_KEY, JSON.stringify(snapshot(new Game())));
+    const previous = storage.getItem(saveKey(this.player));
+    if (previous !== null) storage.setItem(backupKey(this.player), previous);
+    storage.setItem(saveKey(this.player), JSON.stringify(snapshot(new Game())));
     // Block lifecycle saves from writing the old in-memory farm during reload.
     this.writable = false;
+  }
+}
+
+/** Who is playing in this browser. Each player has their own farm save. */
+export class Players {
+  constructor(private storage: () => StorageAccess) {}
+
+  list(): string[] {
+    try {
+      const value: unknown = JSON.parse(this.storage().getItem(PLAYERS_KEY) ?? 'null');
+      if (Array.isArray(value) && value.length && value.every((n) => typeof n === 'string')) return value;
+    } catch { /* fall through to the default player */ }
+    return [DEFAULT_PLAYER];
+  }
+
+  current(): string {
+    let name: string | null = null;
+    try { name = this.storage().getItem(CURRENT_PLAYER_KEY); } catch { /* storage unavailable */ }
+    return name !== null && this.list().includes(name) ? name : DEFAULT_PLAYER;
+  }
+
+  /** Adds the player if new and makes them current. Returns the cleaned-up name. */
+  switchTo(rawName: string): string {
+    const name = rawName.trim().slice(0, 24);
+    if (!name) throw new Error('Player name is empty.');
+    const players = this.list();
+    if (!players.includes(name)) this.storage().setItem(PLAYERS_KEY, JSON.stringify([...players, name]));
+    this.storage().setItem(CURRENT_PLAYER_KEY, name);
+    return name;
   }
 }

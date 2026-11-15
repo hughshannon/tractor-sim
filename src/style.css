@@ -96,4 +96,6 @@ body { font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: 
 
 .save-controls { left: 12px; top: 168px; width: 210px; }
 .save-controls .btn { padding: 5px 8px; font-size: 12px; }
+.player-row { margin-top: 7px; }
+.player-select { flex: 1; min-width: 0; font-size: 12px; }
 .save-status { margin-top: 7px; font-size: 12px; color: #dedbcd; }
