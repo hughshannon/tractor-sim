@@ -56,6 +56,7 @@ export class Hud {
           ['E', 'Interact (garage, silo, fuel)'],
           ['1 2 3', 'Choose seed: wheat, corn, canola'],
           ['C', 'Toggle camera'],
+          ['M', 'Mute / unmute sound'],
           ['Mouse wheel', 'Zoom'],
           ['H', 'Show / hide this help'],
         ].map(([k, v]) => h('tr', {}, h('td.key', {}, k), h('td', {}, v))),
