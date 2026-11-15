@@ -1,10 +1,19 @@
 import * as THREE from 'three';
-import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
-import { CROPS, CROP_IDS } from '../sim/crops';
+import { CROP_IDS, type CropId } from '../sim/crops';
 import { Field, TileState } from '../sim/field';
+import {
+  GROUND_TINT, TURN_TINT, Stage, cropGeometries, cropMaterials, cropStage, stageScale, windTime,
+} from './cropModels';
 import { hash, labelSprite } from './util';
 
 const PX = 4; // texture pixels per tile
+
+/**
+ * Crop rows per tile, as Z offsets from the tile centre. They sit in the two dark furrow stripes that
+ * paintTexture draws (texture rows run towards -Z, so furrow pixel rows 0 and 2 land at +0.75 and -0.25).
+ */
+const ROW_Z = [0.75, -0.25];
+const NO_STAGE = 255;
 
 const SOIL: Record<TileState, [number, number, number]> = {
   [TileState.Grass]: [112, 160, 64],
@@ -14,34 +23,22 @@ const SOIL: Record<TileState, [number, number, number]> = {
   [TileState.Stubble]: [190, 168, 104],
 };
 
-let clumpGeo: THREE.BufferGeometry | null = null;
-function cropClump(): THREE.BufferGeometry {
-  if (clumpGeo) return clumpGeo;
-  const parts: THREE.BufferGeometry[] = [];
-  const offsets = [[-0.45, -0.4], [0.4, -0.35], [0, 0.1], [-0.35, 0.5], [0.45, 0.45]];
-  offsets.forEach(([x, z], i) => {
-    const h = 0.85 + (i % 3) * 0.08;
-    const g = new THREE.ConeGeometry(0.28, h, 5);
-    g.translate(x, h / 2, z);
-    parts.push(g);
-  });
-  clumpGeo = mergeGeometries(parts)!;
-  return clumpGeo;
-}
-
-/** Renders one field: a soil texture with per-tile states and instanced crop clumps. */
+/** Renders one field: a soil texture with per-tile states and instanced crop models per crop and stage. */
 export class FieldView {
   readonly group = new THREE.Group();
   private data: Uint8Array;
   private texture: THREE.DataTexture;
-  private crops: THREE.InstancedMesh;
+  /** One instanced mesh per [crop][stage]. */
+  private crops: THREE.InstancedMesh[][];
+  /** Last rendered crop/stage code per tile, so the soil can be repainted when a stage changes. */
+  private tileStage: Uint8Array;
   private sign: THREE.Group;
   private lastVersion = -1;
   private lastOwned: boolean | null = null;
   private cropTimer = 0;
   private tmpM = new THREE.Matrix4();
   private tmpC = new THREE.Color();
-  private tmpC2 = new THREE.Color();
+  private tint = new THREE.Color();
   private tmpQ = new THREE.Quaternion();
   private tmpS = new THREE.Vector3();
   private tmpP = new THREE.Vector3();
@@ -70,18 +67,33 @@ export class FieldView {
     border.receiveShadow = true;
     this.group.add(border);
 
-    this.crops = new THREE.InstancedMesh(cropClump(), new THREE.MeshLambertMaterial({ flatShading: true }), field.size);
-    this.crops.castShadow = true;
-    this.crops.receiveShadow = true;
-    this.crops.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
-    for (let i = 0; i < field.size; i++) this.crops.setColorAt(i, this.tmpC.setHex(0xffffff));
-    this.group.add(this.crops);
+    this.tileStage = new Uint8Array(field.size).fill(NO_STAGE);
+    const { color, depth } = cropMaterials();
+    const capacity = field.size * ROW_Z.length;
+    // Every instance stays inside the field, so one fixed bounding sphere avoids recomputing it.
+    const bounds = new THREE.Sphere(
+      new THREE.Vector3(field.x + field.width / 2, 1, field.z + field.depth / 2),
+      Math.hypot(field.width, field.depth) / 2 + 2,
+    );
+    this.crops = cropGeometries().map((stages) => stages.map((geo) => {
+      const mesh = new THREE.InstancedMesh(geo, color, capacity);
+      mesh.customDepthMaterial = depth;
+      mesh.castShadow = true;
+      mesh.receiveShadow = true;
+      mesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);
+      mesh.setColorAt(0, this.tmpC.setHex(0xffffff)); // allocate instanceColor before first render
+      mesh.boundingSphere = bounds;
+      mesh.count = 0;
+      this.group.add(mesh);
+      return mesh;
+    }));
 
     this.sign = new THREE.Group();
     this.group.add(this.sign);
   }
 
   update(dt: number): void {
+    windTime.value = performance.now() / 1000;
     const f = this.field;
     if (f.owned !== this.lastOwned) {
       this.lastOwned = f.owned;
@@ -89,15 +101,15 @@ export class FieldView {
     }
     if (f.version !== this.lastVersion) {
       this.lastVersion = f.version;
-      this.paintTexture();
       this.updateCrops();
+      this.paintTexture();
       this.cropTimer = 0;
       return;
     }
     this.cropTimer += dt;
     if (this.cropTimer > 0.25) {
       this.cropTimer = 0;
-      this.updateCrops();
+      if (this.updateCrops()) this.paintTexture();
     }
   }
 
@@ -123,7 +135,12 @@ export class FieldView {
       for (let c = 0; c < f.cols; c++) {
         const i = r * f.cols + c;
         const s = f.state[i] as TileState;
-        const base = SOIL[s];
+        let base = SOIL[s];
+        const code = this.tileStage[i];
+        if (code !== NO_STAGE) {
+          const [tr0, tg, tb, k] = GROUND_TINT[CROP_IDS[code >> 2]][code & 3];
+          base = [base[0] + (tr0 - base[0]) * k, base[1] + (tg - base[1]) * k, base[2] + (tb - base[2]) * k];
+        }
         for (let py = 0; py < PX; py++) {
           for (let px = 0; px < PX; px++) {
             const X = c * PX + px, Y = tr * PX + py;
@@ -145,36 +162,59 @@ export class FieldView {
     this.texture.needsUpdate = true;
   }
 
-  private updateCrops(): void {
+  /** Lay out crop instances. Returns true if any tile changed crop stage (soil needs repainting). */
+  private updateCrops(): boolean {
     const f = this.field;
-    let any = false;
+    for (const stages of this.crops) for (const m of stages) m.count = 0;
+    let stageChanged = false;
     for (let i = 0; i < f.size; i++) {
       const s = f.state[i];
       if (s !== TileState.Seeded && s !== TileState.Ripe) {
-        this.tmpM.makeScale(0, 0, 0);
-        this.crops.setMatrixAt(i, this.tmpM);
+        if (this.tileStage[i] !== NO_STAGE) {
+          this.tileStage[i] = NO_STAGE;
+          stageChanged = true;
+        }
         continue;
       }
-      any = true;
-      const def = CROPS[CROP_IDS[f.crop[i]]];
-      const g = f.growth[i];
+      const ci = f.crop[i];
+      const id: CropId = CROP_IDS[ci];
+      const { stage, t } = cropStage(f.growth[i], s === TileState.Ripe);
+      const code = (ci << 2) | stage;
+      if (this.tileStage[i] !== code) {
+        this.tileStage[i] = code;
+        stageChanged = true;
+      }
+      const mesh = this.crops[ci][stage];
+      const grow = stageScale(stage, t);
+      // Late in the mature stage the crop starts turning towards its ripe colour.
+      const turnHex = TURN_TINT[id];
+      const turn = stage === Stage.Mature && turnHex !== null ? Math.max(0, t - 0.5) * 2 * 0.7 : 0;
+      if (turn > 0) this.tint.setHex(turnHex!);
       const [cx, cz] = f.tileCenter(i);
-      const jitter = hash(i + f.id * 10007);
-      this.tmpP.set(cx + (jitter - 0.5) * 0.4, 0, cz + (hash(i * 3 + 1) - 0.5) * 0.4);
-      this.tmpQ.setFromAxisAngle(this.up, jitter * Math.PI * 2);
-      const h = def.height * (0.08 + 0.92 * g) * (0.9 + jitter * 0.2);
-      const spread = 0.5 + 0.5 * Math.min(1, g * 2);
-      this.tmpS.set(spread, h, spread);
-      this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
-      this.crops.setMatrixAt(i, this.tmpM);
-      if (s === TileState.Ripe) this.tmpC.setHex(def.ripeColor);
-      else this.tmpC.setHex(def.youngColor).lerp(this.tmpC2.setHex(def.ripeColor), Math.max(0, g - 0.7) / 0.3 * 0.6);
-      this.tmpC.multiplyScalar(0.92 + jitter * 0.16);
-      this.crops.setColorAt(i, this.tmpC);
+      for (let r = 0; r < ROW_Z.length; r++) {
+        const seed = (i * ROW_Z.length + r) * 7 + f.id * 100003;
+        const j1 = hash(seed), j2 = hash(seed + 1), j3 = hash(seed + 2);
+        this.tmpP.set(cx + (j1 - 0.5) * 0.3, 0, cz + ROW_Z[r] + (j2 - 0.5) * 0.08);
+        // Flip and mirror segments so neighbours never repeat exactly, while keeping them along the row.
+        this.tmpQ.setFromAxisAngle(this.up, (j1 < 0.5 ? 0 : Math.PI) + (j3 - 0.5) * 0.12);
+        const size = grow * (0.92 + j3 * 0.16);
+        this.tmpS.set(j2 < 0.5 ? -size : size, size * (0.94 + j2 * 0.12), size);
+        this.tmpM.compose(this.tmpP, this.tmpQ, this.tmpS);
+        const n = mesh.count++;
+        mesh.setMatrixAt(n, this.tmpM);
+        this.tmpC.setScalar(0.9 + j1 * 0.2);
+        if (turn > 0) this.tmpC.lerp(this.tint, turn);
+        mesh.setColorAt(n, this.tmpC);
+      }
     }
-    this.crops.visible = any;
-    this.crops.instanceMatrix.needsUpdate = true;
-    if (this.crops.instanceColor) this.crops.instanceColor.needsUpdate = true;
-    this.crops.computeBoundingSphere();
+    for (const stages of this.crops) {
+      for (const m of stages) {
+        m.visible = m.count > 0;
+        if (!m.visible) continue;
+        m.instanceMatrix.needsUpdate = true;
+        if (m.instanceColor) m.instanceColor.needsUpdate = true;
+      }
+    }
+    return stageChanged;
   }
 }
