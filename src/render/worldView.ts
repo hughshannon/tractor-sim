@@ -1,10 +1,13 @@
 import * as THREE from 'three';
 import { BUILDINGS, WORLD_HALF, ZONES, type Building } from '../sim/farm';
 import type { Field } from '../sim/field';
+import { Lamps, glowMaterial, glowTexture } from './lighting';
 import { box, cyl, hash, labelSprite, mat } from './util';
 
-export function buildWorld(scene: THREE.Scene, fields: Field[]): void {
+export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): void {
   for (const b of BUILDINGS) scene.add(buildBuilding(b));
+  buildFloodlights(scene, lamps);
+  buildFieldLights(scene, fields, lamps);
 
   for (const z of ZONES) {
     const ring = new THREE.Mesh(
@@ -123,4 +126,118 @@ function buildBuilding(b: Building): THREE.Group {
     g.add(hose);
   }
   return g;
+}
+
+const FLOOD_ON = 0xfff2d8;
+
+/** A wall- or pole-mounted floodlight: housing, glowing lens, flare, faint beam and a real spotlight. */
+function floodlight(
+  scene: THREE.Scene, lamps: Lamps, at: THREE.Vector3, aim: THREE.Vector3,
+  opts: { intensity: number; angle: number; reach: number },
+): void {
+  const g = new THREE.Group();
+  g.position.copy(at);
+  g.lookAt(aim);
+  // Housing faces +Z towards the aim point after lookAt.
+  g.add(box(0.7, 0.4, 0.3, 0x2e3236, 0, 0, -0.05));
+  const lens = new THREE.Mesh(new THREE.PlaneGeometry(0.58, 0.3), lamps.lens(0x8a8f96, FLOOD_ON));
+  lens.position.z = 0.11;
+  g.add(lens);
+  scene.add(g);
+
+  const flare = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: FLOOD_ON, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0,
+  }));
+  lamps.glow(flare.material, 0.9);
+  flare.scale.setScalar(2.4);
+  flare.position.copy(at).addScaledVector(aim.clone().sub(at).normalize(), 0.25);
+  scene.add(flare);
+
+  // Faint visible beam: an open cone from the lamp to the ground.
+  const dir = aim.clone().sub(at);
+  const len = dir.length();
+  const coneGeo = new THREE.ConeGeometry(Math.tan(opts.angle * 0.8) * len, len, 24, 1, true);
+  coneGeo.translate(0, -len / 2, 0);
+  const beam = new THREE.Mesh(coneGeo, lamps.glow(glowMaterial(0xffe6b8, { map: false, side: THREE.DoubleSide }), 0.03));
+  beam.position.copy(at);
+  beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), dir.normalize());
+  beam.renderOrder = 2;
+  scene.add(beam);
+
+  const spot = lamps.light(new THREE.SpotLight(FLOOD_ON, 0, opts.reach, opts.angle, 0.55, 1.4), opts.intensity);
+  spot.position.copy(at);
+  spot.target.position.copy(aim);
+  scene.add(spot, spot.target);
+}
+
+function buildFloodlights(scene: THREE.Scene, lamps: Lamps): void {
+  const v = (x: number, y: number, z: number) => new THREE.Vector3(x, y, z);
+  // Garage: a pair over the big door, lighting the apron and the shop zone.
+  floodlight(scene, lamps, v(-19.5, 4.7, -5.7), v(-17, 0, 0), { intensity: 90, angle: 0.75, reach: 32 });
+  floodlight(scene, lamps, v(-10.5, 4.7, -5.7), v(-13, 0, 0), { intensity: 90, angle: 0.75, reach: 32 });
+  // Silo: high on the front of the tall bin, over the intake and sell zone.
+  floodlight(scene, lamps, v(12.8, 7.5, -10.05), v(15, 0, -2), { intensity: 160, angle: 0.6, reach: 40 });
+  // Fuel pump: a lamp post beside the pump arching over the fuel zone.
+  const pole = cyl(0.09, 0.12, 5.4, 0x5a5f66, 8);
+  pole.position.set(1.35, 2.7, -11.5);
+  const arm = box(0.1, 0.1, 1.8, 0x5a5f66, 1.35, 5.35, -10.7);
+  scene.add(pole, arm);
+  floodlight(scene, lamps, v(1.35, 5.2, -9.8), v(0, 0, -7), { intensity: 70, angle: 0.8, reach: 25 });
+
+  // Lit office window at the silo.
+  const win = new THREE.Mesh(new THREE.PlaneGeometry(1.4, 0.8), lamps.lens(0x6f8796, 0xffd48a));
+  win.position.set(18.2, 1.6, -6.98);
+  scene.add(win);
+  const winGlow = new THREE.Sprite(new THREE.SpriteMaterial({
+    map: glowTexture(), color: 0xffc070, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0,
+  }));
+  lamps.glow(winGlow.material, 0.22);
+  winGlow.scale.set(3, 2, 1);
+  winGlow.position.set(18.2, 1.6, -6.8);
+  scene.add(winGlow);
+  const winLight = lamps.light(new THREE.PointLight(0xffc070, 0, 8, 1.5), 6);
+  winLight.position.set(18.2, 1.6, -6.2);
+  scene.add(winLight);
+}
+
+const FIELD_LIGHT = 0xffc27a;
+const FIELD_LIGHT_SPACING = 6;
+const FIELD_LIGHT_INSET = 1.1;
+
+/** Low in-ground marker lights around every field edge, each casting a soft pool of light. */
+function buildFieldLights(scene: THREE.Scene, fields: Field[], lamps: Lamps): void {
+  const points: [number, number][] = [];
+  for (const f of fields) {
+    const x0 = f.x - FIELD_LIGHT_INSET, z0 = f.z - FIELD_LIGHT_INSET;
+    const x1 = f.x + f.width + FIELD_LIGHT_INSET, z1 = f.z + f.depth + FIELD_LIGHT_INSET;
+    const nx = Math.max(1, Math.round((x1 - x0) / FIELD_LIGHT_SPACING));
+    const nz = Math.max(1, Math.round((z1 - z0) / FIELD_LIGHT_SPACING));
+    // Skip the first corner: the field sign stands there.
+    for (let i = 1; i <= nx; i++) points.push([x0 + ((x1 - x0) * i) / nx, z0], [x1 - ((x1 - x0) * i) / nx, z1]);
+    for (let i = 1; i < nz; i++) points.push([x0, z1 - ((z1 - z0) * i) / nz], [x1, z0 + ((z1 - z0) * i) / nz]);
+  }
+  const n = points.length;
+  const housings = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.14, 0.18, 0.12, 8), mat(0x3a3d40), n);
+  const caps = new THREE.InstancedMesh(new THREE.CylinderGeometry(0.09, 0.09, 0.04, 8), lamps.lens(0x9a9a8a, 0xffe0b0), n);
+  const pools = new THREE.InstancedMesh(
+    new THREE.PlaneGeometry(4.2, 4.2).rotateX(-Math.PI / 2),
+    lamps.glow(glowMaterial(FIELD_LIGHT), 0.32), n,
+  );
+  pools.renderOrder = 1;
+  const flarePos = new Float32Array(n * 3);
+  const m = new THREE.Matrix4();
+  points.forEach(([x, z], i) => {
+    housings.setMatrixAt(i, m.makeTranslation(x, 0.06, z));
+    caps.setMatrixAt(i, m.makeTranslation(x, 0.13, z));
+    pools.setMatrixAt(i, m.makeTranslation(x, 0.05, z));
+    flarePos.set([x, 0.3, z], i * 3);
+  });
+  const flareGeo = new THREE.BufferGeometry();
+  flareGeo.setAttribute('position', new THREE.BufferAttribute(flarePos, 3));
+  const flares = new THREE.Points(flareGeo, lamps.glow(new THREE.PointsMaterial({
+    color: FIELD_LIGHT, map: glowTexture(), size: 1.1, transparent: true, opacity: 0,
+    blending: THREE.AdditiveBlending, depthWrite: false,
+  }), 0.8));
+  housings.receiveShadow = true;
+  scene.add(housings, caps, pools, flares);
 }
