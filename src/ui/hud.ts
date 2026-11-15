@@ -68,7 +68,7 @@ export class Hud {
     root.append(stats, this.market, imp, this.fieldEl, this.prompt, this.toasts, this.help);
   }
 
-  /** In the cab view the in-cab instruments replace the screen HUD (help, shop and save controls stay). */
+  /** In the cab view the in-cab instruments replace the screen HUD (help and shop stay). */
   setCabMode(on: boolean): void {
     this.root.classList.toggle('cab-mode', on);
   }
