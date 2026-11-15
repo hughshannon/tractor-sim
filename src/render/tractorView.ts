@@ -36,6 +36,9 @@ export class TractorView {
   private implementId: string | null = null;
   private colorHex = -1;
   private exhaust: THREE.Mesh;
+  private steeringWheel = new THREE.Group();
+  /** Driver's eye position, used by the cab camera. Parented to the body so it shares the engine shake. */
+  readonly eye = new THREE.Object3D();
 
   constructor() {
     this.paint = new THREE.MeshLambertMaterial({ color: 0xc8302a, flatShading: true });
@@ -62,9 +65,37 @@ export class TractorView {
     b.add(g1);
     b.add(painted(1.5, 0.14, 1.7, 0, 2.95, -0.75));
     b.add(box(0.5, 0.5, 0.5, 0x3a3a3a, 0, 1.65, -0.6)); // seat
+    b.add(box(0.5, 0.6, 0.12, 0x3a3a3a, 0, 2.1, -0.86)); // seat back
+    // Dashboard, gauges and steering wheel (seen from the cab view).
+    b.add(box(1.1, 0.3, 0.3, 0x2a2a2a, 0, 1.75, -0.2));
+    for (const x of [-0.3, 0.3]) {
+      const gauge = cyl(0.07, 0.07, 0.02, 0xf2f2f2, 12);
+      gauge.rotation.x = -0.6; // face the driver
+      gauge.position.set(x, 1.91, -0.26);
+      b.add(gauge);
+    }
+    const tilt = new THREE.Group();
+    tilt.position.set(0, 2.06, -0.36);
+    tilt.rotation.x = 0.66; // lean the wheel back toward the driver
+    const shaft = cyl(0.035, 0.035, 0.3, 0x222222, 6);
+    shaft.rotation.x = Math.PI / 2;
+    shaft.position.z = 0.15;
+    tilt.add(shaft);
+    const rim = new THREE.Mesh(new THREE.TorusGeometry(0.19, 0.025, 6, 16), mat(0x1c1c1c));
+    this.steeringWheel.add(rim);
+    for (let i = 0; i < 3; i++) {
+      const spoke = box(0.03, 0.19, 0.02, 0x1c1c1c);
+      spoke.geometry.translate(0, 0.095, 0);
+      spoke.rotation.z = (i / 3) * Math.PI * 2;
+      this.steeringWheel.add(spoke);
+    }
+    tilt.add(this.steeringWheel);
+    b.add(tilt);
+    this.eye.position.set(0, 2.45, -0.8);
+    b.add(this.eye);
     // Exhaust.
     this.exhaust = cyl(0.07, 0.07, 1.1, 0x333333, 6);
-    this.exhaust.position.set(0.4, 2.2, 1.6);
+    this.exhaust.position.set(0.45, 2.2, 1.75);
     b.add(this.exhaust);
     // Lights.
     b.add(box(0.2, 0.14, 0.05, 0xfff6c0, 0.35, 1.45, 2.13));
@@ -114,6 +145,8 @@ export class TractorView {
     for (const w of this.rearWheels) w.rotation.x = s.odometer / REAR_R;
     for (const w of this.frontWheels) w.rotation.x = s.odometer / FRONT_R;
     for (const p of this.frontPivots) p.rotation.y = s.steer;
+    // Positive steer is left, which turns the wheel anticlockwise from the driver's seat.
+    this.steeringWheel.rotation.z = -s.steer * 3;
     // Engine vibration.
     const rpm = 0.5 + Math.min(1, Math.abs(s.speed) / 8);
     this.body.position.y = Math.sin(time * 60 * rpm) * 0.015;

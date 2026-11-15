@@ -1,7 +1,7 @@
 import './style.css';
 import { SoundEngine } from './audio/sound';
 import { Input } from './core/input';
-import { CameraRig } from './render/cameraRig';
+import { CAMERA_MODE_NAMES, CameraRig } from './render/cameraRig';
 import { FieldView } from './render/fieldView';
 import { createScene } from './render/scene';
 import { TractorView } from './render/tractorView';
@@ -30,6 +30,7 @@ const fieldViews = game.fields.map((f) => {
 const tractorView = new TractorView();
 scene.add(tractorView.root);
 const rig = new CameraRig(camera, renderer.domElement);
+rig.setCabAnchor(tractorView.eye);
 
 const input = new Input();
 const hud = new Hud(uiRoot, game);
@@ -66,7 +67,7 @@ input.on('KeyE', () => {
 });
 input.on('Escape', () => (shop.open ? shop.close() : hud.toggleHelp(false)));
 input.on('KeyH', () => !shop.open && hud.toggleHelp());
-input.on('KeyC', () => rig.toggle());
+input.on('KeyC', () => game.notify(CAMERA_MODE_NAMES[rig.toggle()], 'info', 0));
 input.on('KeyM', toggleMute);
 CROP_IDS.forEach((id, i) => input.on([`Digit${i + 1}`, `Numpad${i + 1}`], () => !paused() && game.setSeed(id)));
 
