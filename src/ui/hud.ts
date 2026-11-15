@@ -1,5 +1,6 @@
 import { CROPS, CROP_IDS } from '../sim/crops';
 import { TileState } from '../sim/field';
+import { clockText, nightFactor } from '../sim/daylight';
 import { FUEL_PRICE, Game } from '../sim/game';
 import { priceTrend } from '../sim/market';
 import { h, money } from './dom';
@@ -20,6 +21,7 @@ function bar(cls: string): { el: HTMLElement; fill: HTMLElement } {
 export class Hud {
   private moneyEl = h('div.money');
   private tractorEl = h('div.sub');
+  private clockEl = h('div.clock');
   private speedEl = h('div.speed');
   private fuel = bar('fuel');
   private fuelText = h('span');
@@ -39,7 +41,7 @@ export class Hud {
 
   constructor(root: HTMLElement, private game: Game) {
     const stats = h('div.panel.stats', {},
-      this.moneyEl, this.tractorEl,
+      h('div.row', {}, this.moneyEl, this.clockEl), this.tractorEl,
       h('div.row', {}, h('span.label', {}, 'Fuel'), this.fuel.el, this.fuelText),
       this.speedEl,
     );
@@ -81,6 +83,7 @@ export class Hud {
     const def = g.tractorDef;
     this.moneyEl.textContent = money(g.money);
     this.tractorEl.textContent = def.name;
+    this.clockEl.textContent = `${nightFactor(g.time) > 0.5 ? '🌙' : '☀️'} ${clockText(g.time)}`;
     const fuelPct = g.fuel / def.fuelCapacity;
     this.fuel.fill.style.width = `${fuelPct * 100}%`;
     this.fuel.el.classList.toggle('low', fuelPct < 0.15);

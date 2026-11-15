@@ -7,6 +7,7 @@ export interface SceneBundle {
   scene: THREE.Scene;
   camera: THREE.PerspectiveCamera;
   sun: THREE.DirectionalLight;
+  hemi: THREE.HemisphereLight;
   resize(): void;
 }
 
@@ -24,7 +25,8 @@ export function createScene(container: HTMLElement): SceneBundle {
 
   const camera = new THREE.PerspectiveCamera(50, 1, 0.5, 800);
 
-  scene.add(new THREE.HemisphereLight(0xdff2ff, 0x5a7a3a, 1.4));
+  const hemi = new THREE.HemisphereLight(0xdff2ff, 0x5a7a3a, 1.4);
+  scene.add(hemi);
   const sun = new THREE.DirectionalLight(0xfff1d6, 2.2);
   sun.castShadow = true;
   sun.shadow.mapSize.set(2048, 2048);
@@ -44,7 +46,7 @@ export function createScene(container: HTMLElement): SceneBundle {
   window.addEventListener('resize', resize);
   resize();
 
-  return { renderer, scene, camera, sun, resize };
+  return { renderer, scene, camera, sun, hemi, resize };
 }
 
 function createGround(): THREE.Group {

@@ -16,6 +16,7 @@ body { font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: 
 
 .stats { top: 12px; left: 12px; min-width: 210px; }
 .stats .money { font-size: 26px; font-weight: 800; color: #9cf27a; }
+.stats .clock { font-size: 16px; font-weight: 700; font-variant-numeric: tabular-nums; color: #f4f1e6; }
 .stats .sub { color: #c8c8b8; font-size: 12px; margin-bottom: 6px; }
 .stats .speed { font-size: 18px; font-weight: 700; margin-top: 4px; }
 

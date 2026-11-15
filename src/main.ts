@@ -3,10 +3,12 @@ import { SoundEngine } from './audio/sound';
 import { Input } from './core/input';
 import { CAMERA_MODE_NAMES, CameraRig } from './render/cameraRig';
 import { FieldView } from './render/fieldView';
+import { DayNight, Lamps } from './render/lighting';
 import { createScene } from './render/scene';
 import { TractorView } from './render/tractorView';
 import { buildWorld } from './render/worldView';
 import { CROP_IDS } from './sim/crops';
+import { lampsOn } from './sim/daylight';
 import { FarmSaves } from './sim/save';
 import { Hud } from './ui/hud';
 import { Shop } from './ui/shop';
@@ -20,8 +22,11 @@ const uiRoot = document.getElementById('ui')!;
 const saves = new FarmSaves(() => window.localStorage);
 const loaded = saves.load();
 const game = loaded.game;
-const { renderer, scene, camera, sun } = createScene(container);
-buildWorld(scene, game.fields);
+const { renderer, scene, camera, sun, hemi } = createScene(container);
+const farmLamps = new Lamps();
+buildWorld(scene, game.fields, farmLamps);
+const dayNight = new DayNight(scene, sun, hemi);
+let lampLevel = lampsOn(game.time) ? 1 : 0;
 const fieldViews = game.fields.map((f) => {
   const v = new FieldView(f);
   scene.add(v.group);
@@ -95,9 +100,12 @@ function frame(now: number) {
   tractorView.update(t, game.lowerAnim, now / 1000);
   for (const v of fieldViews) v.update(dt);
   rig.update(t, dt);
-  // Keep the shadow frustum centred on the tractor.
-  sun.position.set(t.x + 40, 70, t.z + 25);
-  sun.target.position.set(t.x, 0, t.z);
+  // Sky, sun/moon (shadow frustum centred on the tractor) and lamps that fade on at dusk.
+  dayNight.update(game.time, t, camera);
+  lampLevel += ((lampsOn(game.time) ? 1 : 0) - lampLevel) * Math.min(1, dt * 1.5);
+  farmLamps.set(lampLevel);
+  tractorView.lamps.set(lampLevel);
+  tractorView.showBeam(rig.mode !== 'cab');
   hud.update(dt);
 
   const speed = Math.abs(t.speed);

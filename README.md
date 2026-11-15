@@ -60,5 +60,6 @@ and use **Deploy → Static** (build: `npm ci && npm run build`, public dir: `di
 - [x] M3 Seed, grow, harvest
 - [x] M4 Economy, HUD, shop
 - [x] Synthesised sound (engine, implements, effects, ambience)
-- [ ] M5 Day/night, seasons, weather, save/load
+- [x] Day/night cycle (10-minute days, floodlit yard, tractor headlights & work lights, field-edge lights)
+- [ ] M5 Seasons, weather, save/load
 - [ ] M6 Particles, minimap, touch controls

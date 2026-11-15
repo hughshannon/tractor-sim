@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import type { ImplementDef } from '../sim/equipment';
 import type { TractorState } from '../sim/tractor';
+import { Lamps, glowMaterial, glowTexture } from './lighting';
 import { box, cyl, mat } from './util';
 
 const REAR_R = 0.85;
@@ -39,6 +40,10 @@ export class TractorView {
   private steeringWheel = new THREE.Group();
   /** Driver's eye position, used by the cab camera. Parented to the body so it shares the engine shake. */
   readonly eye = new THREE.Object3D();
+  /** Headlights, work lights and tail lights; switched on at dusk. */
+  readonly lamps = new Lamps();
+  /** Headlight haze cone; hidden in the cab view, where the camera sits inside it. */
+  private beam: THREE.Mesh | null = null;
 
   constructor() {
     this.paint = new THREE.MeshLambertMaterial({ color: 0xc8302a, flatShading: true });
@@ -97,10 +102,8 @@ export class TractorView {
     this.exhaust = cyl(0.07, 0.07, 1.1, 0x333333, 6);
     this.exhaust.position.set(0.45, 2.2, 1.75);
     b.add(this.exhaust);
-    // Lights.
-    b.add(box(0.2, 0.14, 0.05, 0xfff6c0, 0.35, 1.45, 2.13));
-    b.add(box(0.2, 0.14, 0.05, 0xfff6c0, -0.35, 1.45, 2.13));
     this.root.add(b);
+    this.buildLights();
 
     for (const side of [-1, 1]) {
       const rw = wheel(REAR_R, 0.55);
@@ -117,6 +120,64 @@ export class TractorView {
       this.root.add(pivot);
     }
     this.root.add(this.implementMount);
+  }
+
+  private buildLights(): void {
+    const b = this.body;
+    const L = this.lamps;
+    const flare = (color: number, size: number, max: number, x: number, y: number, z: number) => {
+      const sp = new THREE.Sprite(new THREE.SpriteMaterial({
+        map: glowTexture(), color, blending: THREE.AdditiveBlending, depthWrite: false, transparent: true, opacity: 0,
+      }));
+      L.glow(sp.material, max);
+      sp.scale.setScalar(size);
+      sp.position.set(x, y, z);
+      b.add(sp);
+    };
+    const headLens = L.lens(0xfff6c0, 0xffffff);
+    for (const side of [-1, 1]) {
+      // Headlights in the grille, each with a real spotlight reaching well down the field.
+      const lens = new THREE.Mesh(new THREE.BoxGeometry(0.22, 0.15, 0.05), headLens);
+      lens.position.set(side * 0.35, 1.45, 2.14);
+      b.add(lens);
+      flare(0xfff4dc, 1.1, 0.85, side * 0.35, 1.45, 2.25);
+      const head = L.light(new THREE.SpotLight(0xfff4dc, 0, 55, 0.42, 0.45, 1.3), 260);
+      head.position.set(side * 0.35, 1.45, 2.2);
+      head.target.position.set(side * 0.9, 0, 16);
+      b.add(head, head.target);
+
+      // Roof work lights, angled down over the implement behind.
+      b.add(box(0.28, 0.18, 0.14, 0x2e3236, side * 0.55, 3.08, -1.55));
+      const work = new THREE.Mesh(new THREE.PlaneGeometry(0.22, 0.12), L.lens(0x8a8f96, 0xfff2d8));
+      work.position.set(side * 0.55, 3.08, -1.63);
+      work.rotation.y = Math.PI;
+      b.add(work);
+      flare(0xfff2d8, 0.8, 0.6, side * 0.55, 3.08, -1.72);
+      const rear = L.light(new THREE.SpotLight(0xfff2d8, 0, 20, 0.85, 0.6, 1.4), 25);
+      rear.position.set(side * 0.55, 3.0, -1.7);
+      rear.target.position.set(side * 1.2, 0, -6);
+      b.add(rear, rear.target);
+
+      // Tail lights on the rear fenders.
+      const tail = new THREE.Mesh(new THREE.BoxGeometry(0.16, 0.1, 0.04), L.lens(0x6a1a14, 0xff2a1a));
+      tail.position.set(side * 0.95, 1.55, -1.52);
+      b.add(tail);
+      flare(0xff3020, 0.6, 0.7, side * 0.95, 1.55, -1.6);
+    }
+    // A faint beam haze in front of the tractor.
+    const len = 14;
+    const beamGeo = new THREE.ConeGeometry(Math.tan(0.36) * len, len, 20, 1, true);
+    beamGeo.translate(0, -len / 2, 0);
+    const beam = new THREE.Mesh(beamGeo, L.glow(glowMaterial(0xfff4dc, { map: false, side: THREE.DoubleSide }), 0.035));
+    beam.position.set(0, 1.45, 2.2);
+    beam.quaternion.setFromUnitVectors(new THREE.Vector3(0, -1, 0), new THREE.Vector3(0, -1.45, 13.8).normalize());
+    beam.renderOrder = 2;
+    b.add(beam);
+    this.beam = beam;
+  }
+
+  showBeam(show: boolean): void {
+    if (this.beam) this.beam.visible = show;
   }
 
   setColor(hex: number): void {
