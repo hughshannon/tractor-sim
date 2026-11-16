@@ -259,6 +259,30 @@ function buildImplement(def: ImplementDef): { group: THREE.Group; lift: THREE.Ob
       wh.position.set(side * (w / 2 + 0.2), 0.4, zBar + 0.2);
       group.add(wh);
     }
+  } else if (def.kind === 'sprayer') {
+    // Tank on a frame with a folding-style boom; the boom drops to working height when lowered.
+    const tz = zBar + 0.9;
+    group.add(box(1.4, 0.15, 1.5, 0x444444, 0, 0.55, tz));
+    const tank = cyl(0.6, 0.6, 1.3, 0xe8e8e8, 12);
+    tank.rotation.x = Math.PI / 2;
+    tank.position.set(0, 1.25, tz);
+    tank.castShadow = true;
+    group.add(tank);
+    group.add(box(0.3, 0.15, 0.3, 0x2d5fa8, 0, 1.9, tz));
+    for (const side of [-1, 1]) {
+      const wh = cyl(0.45, 0.45, 0.25, 0x222222, 10);
+      wh.rotation.z = Math.PI / 2;
+      wh.position.set(side * 0.85, 0.45, tz);
+      group.add(wh);
+    }
+    lift.add(box(w, 0.1, 0.1, 0x2d5fa8, 0, 0.75, zBar));
+    lift.add(box(w * 0.6, 0.06, 0.06, 0x2d5fa8, 0, 1.05, zBar));
+    const n = Math.round(w / 1.5);
+    for (let i = 0; i <= n; i++) {
+      const x = -w / 2 + (w * i) / n;
+      lift.add(box(0.06, 0.25, 0.06, 0x333333, x, 0.6, zBar));
+      if (i % 2 === 0 && Math.abs(x) <= w * 0.3) lift.add(box(0.05, 0.3, 0.05, 0x2d5fa8, x, 0.9, zBar));
+    }
   } else {
     // Harvester header with a spinning reel.
     lift.add(box(w, 0.25, 1.2, 0xd8a020, 0, 0.35, zBar));

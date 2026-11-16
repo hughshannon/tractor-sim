@@ -46,3 +46,11 @@ export function zoneAt(x: number, z: number): Zone | null {
   }
   return null;
 }
+
+/** Silo storage upgrades. Level 0 has no storage: grain must be sold straight from the tank. */
+export const STORAGE_LEVELS: { capacity: number; price: number; name: string }[] = [
+  { capacity: 0, price: 0, name: 'No storage' },
+  { capacity: 10000, price: 6000, name: 'Grain bin 10,000 L' },
+  { capacity: 25000, price: 12000, name: 'Grain bins 25,000 L' },
+  { capacity: 60000, price: 25000, name: 'Storage silo 60,000 L' },
+];

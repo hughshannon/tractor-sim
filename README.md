@@ -25,8 +25,15 @@ npm run dev        # http://localhost:5000
 | M | Mute / unmute sound |
 | H | Help |
 
-**Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → wait for growth → harvest again.
-Swap implements (plow, seeder, harvester) at the garage. Prices drift over time, so check the market panel before selling.
+**Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → (spray fertilizer) → wait for growth → harvest again.
+Swap implements (plow, seeder, sprayer, harvester) at the garage. Prices drift over time, so check the market panel before selling.
+
+**Spending money:**
+- **Sprayer** (6/12/18 m): fertilize growing crops for $2/tile to get +40% yield.
+- **Grain storage** (10k / 25k / 60k L, built from the garage): unload at the silo and sell later, when prices peak.
+- **Wear & repairs**: tractors wear with distance driven, implements with time worked. Below 50% condition they
+  work slower and burn more fuel; at 0% they stop. Repair at the garage workshop.
+- **Equipment tiers**: Scout 50 (fast utility), Workhorse 200, Titan 400; 9 m implements need 180 hp.
 
 ## Development
 

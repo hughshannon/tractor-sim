@@ -1,12 +1,14 @@
 import { CROP_IDS } from './crops';
-import { IMPLEMENTS, TRACTORS } from './equipment';
-import { WORLD_HALF } from './farm';
+import { IMPLEMENTS, TRACTORS, canPull } from './equipment';
+import { STORAGE_LEVELS, WORLD_HALF } from './farm';
 import { NO_CROP, TileState } from './field';
 import { Game } from './game';
 
 export const SAVE_KEY = 'tractor-farm.save';
 export const BACKUP_KEY = 'tractor-farm.previous-save';
-export const SAVE_VERSION = 1;
+export const SAVE_VERSION = 2;
+/** Older versions decodeSave can upgrade. */
+const MIGRATABLE = [1];
 
 /** Only simulation state belongs in a save; definitions and effects stay in code. */
 export function snapshot(game: Game) {
@@ -25,12 +27,17 @@ export function snapshot(game: Game) {
     fuel: game.fuel,
     grain: { ...game.grain },
     stats: { ...game.stats },
+    tractorCondition: Object.fromEntries([...game.ownedTractors].map((id) => [id, game.tractorCondition.get(id) ?? 1])),
+    implementCondition: Object.fromEntries([...game.ownedImplements].map((id) => [id, game.implementCondition.get(id) ?? 1])),
+    storageLevel: game.storageLevel,
+    storage: { ...game.storage },
     fields: game.fields.map((field) => ({
       id: field.id,
       owned: field.owned,
       state: Array.from(field.state),
       crop: Array.from(field.crop),
       growth: Array.from(field.growth),
+      fert: Array.from(field.fert),
     })),
   };
 }
@@ -48,6 +55,34 @@ const inventory = (value: unknown, definitions: object): value is string[] =>
   Array.isArray(value) && value.length <= Object.keys(definitions).length
   && value.every((id) => known(id, definitions)) && new Set(value).size === value.length;
 
+/** Conditions must cover exactly the owned items, each 0..1. */
+const conditions = (value: unknown, owned: string[]): value is Record<string, number> =>
+  record(value) && Object.keys(value).length === owned.length
+  && owned.every((id) => Object.hasOwn(value, id) && number(value[id], 0, 1));
+
+/**
+ * Upgrade an older save to the current shape: equipment starts in perfect condition, with no storage and no
+ * fertilized tiles. The result still goes through full validation.
+ */
+function migrate(value: RecordValue): RecordValue {
+  if (value.version === 1) {
+    const ids = (v: unknown) => (Array.isArray(v) ? v.filter((x): x is string => typeof x === 'string') : []);
+    const perfect = (v: unknown) => Object.fromEntries(ids(v).map((id) => [id, 1]));
+    return {
+      ...value,
+      version: 2,
+      tractorCondition: perfect(value.ownedTractors),
+      implementCondition: perfect(value.ownedImplements),
+      storageLevel: 0,
+      storage: { wheat: 0, corn: 0, canola: 0 },
+      fields: Array.isArray(value.fields)
+        ? value.fields.map((f: unknown) => (record(f) && Array.isArray(f.state) ? { ...f, fert: f.state.map(() => 0) } : f))
+        : value.fields,
+    };
+  }
+  return value;
+}
+
 /** Reject the whole save on any mismatch, before touching a running game. */
 function valid(value: unknown, game: Game): value is Save {
   if (!record(value) || value.version !== SAVE_VERSION
@@ -57,9 +92,18 @@ function valid(value: unknown, game: Game): value is Save {
     || !known(value.tractorId, TRACTORS) || !value.ownedTractors.includes(value.tractorId)
     || (value.attached !== null && (!known(value.attached, IMPLEMENTS) || !value.ownedImplements.includes(value.attached)))
     || typeof value.lowered !== 'boolean' || (value.lowered && value.attached === null)
-    || !number(value.lowerAnim, 0, 1) || !crop(value.seedCrop)) return false;
+    || !number(value.lowerAnim, 0, 1) || !crop(value.seedCrop)
+    || !conditions(value.tractorCondition, value.ownedTractors)
+    || !conditions(value.implementCondition, value.ownedImplements)
+    || !number(value.storageLevel, 0, STORAGE_LEVELS.length - 1) || !Number.isInteger(value.storageLevel)) return false;
 
   const def = TRACTORS[value.tractorId];
+  if (value.attached !== null && !canPull(def, IMPLEMENTS[value.attached])) return false;
+  const storage = value.storage;
+  if (!record(storage) || Object.keys(storage).length !== CROP_IDS.length
+    || !CROP_IDS.every((id) => Object.hasOwn(storage, id) && number(storage[id]))
+    || CROP_IDS.reduce((n, id) => n + (storage[id] as number), 0) > STORAGE_LEVELS[value.storageLevel].capacity) return false;
+
   const t = value.tractor;
   const grain = value.grain;
   if (!record(t) || !number(t.x, -WORLD_HALF + 2, WORLD_HALF - 2)
@@ -79,11 +123,15 @@ function valid(value: unknown, game: Game): value is Save {
       || (index === 0 && !saved.owned)
       || !Array.isArray(saved.state) || saved.state.length !== field.size
       || !Array.isArray(saved.crop) || saved.crop.length !== field.size
-      || !Array.isArray(saved.growth) || saved.growth.length !== field.size) return false;
+      || !Array.isArray(saved.growth) || saved.growth.length !== field.size
+      || !Array.isArray(saved.fert) || saved.fert.length !== field.size) return false;
     for (let i = 0; i < field.size; i++) {
       const state: unknown = saved.state[i];
       const id: unknown = saved.crop[i];
       const growth: unknown = saved.growth[i];
+      const fert: unknown = saved.fert[i];
+      if (fert !== 0 && fert !== 1) return false;
+      if (fert === 1 && state !== TileState.Seeded && state !== TileState.Ripe) return false;
       if (!number(state, TileState.Grass, TileState.Stubble) || !Number.isInteger(state)
         || !number(growth, 0, 1)) return false;
       if (state === TileState.Seeded || state === TileState.Ripe) {
@@ -96,10 +144,11 @@ function valid(value: unknown, game: Game): value is Save {
 }
 
 export function decodeSave(raw: string): Game {
-  const value: unknown = JSON.parse(raw);
-  if (record(value) && value.version !== SAVE_VERSION) {
+  const parsed: unknown = JSON.parse(raw);
+  if (record(parsed) && parsed.version !== SAVE_VERSION && !MIGRATABLE.includes(parsed.version as number)) {
     throw new Error('This save uses an unsupported version.');
   }
+  const value: unknown = record(parsed) ? migrate(parsed) : parsed;
   const game = new Game();
   if (!valid(value, game)) throw new Error('This save is damaged or incompatible.');
   game.time = value.time;
@@ -115,12 +164,17 @@ export function decodeSave(raw: string): Game {
   game.fuel = value.fuel;
   game.grain = { ...value.grain };
   game.stats = { ...value.stats };
+  game.tractorCondition = new Map(Object.entries(value.tractorCondition));
+  game.implementCondition = new Map(Object.entries(value.implementCondition));
+  game.storageLevel = value.storageLevel;
+  game.storage = { ...value.storage };
   value.fields.forEach((saved, index) => {
     const field = game.fields[index];
     field.owned = saved.owned;
     field.state.set(saved.state);
     field.crop.set(saved.crop);
     field.growth.set(saved.growth);
+    field.fert.set(saved.fert);
     field.version++;
   });
   return game;

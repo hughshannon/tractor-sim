@@ -95,6 +95,23 @@ body { font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: 
 }
 .mute-btn:hover { background: rgba(48, 60, 40, 0.9); }
 
-.save-controls { left: 12px; top: 168px; width: 210px; }
+.save-controls { left: 12px; top: 190px; width: 210px; }
 .save-controls .btn { padding: 5px 8px; font-size: 12px; }
 .save-status { margin-top: 7px; font-size: 12px; color: #dedbcd; }
+
+/* Equipment condition, workshop, silo */
+.bar.wear .fill { background: #7ac4f2; }
+.bar.wear.low .fill { background: #e8453a; }
+.imp-name.worn { color: #ffb05a; }
+.cond { display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: #9cf27a; vertical-align: middle; }
+.cond.worn { color: #ffb05a; }
+.cond.bad { color: #ff8a7a; }
+.cbar { display: inline-block; width: 42px; height: 6px; border-radius: 3px; background: rgba(255, 255, 255, 0.15); overflow: hidden; }
+.cfill { display: block; height: 100%; background: currentColor; }
+.dim.need { color: #ff8a7a; }
+.note { margin: -2px 0 6px; }
+.btns { display: flex; gap: 6px; }
+.silo-window { width: min(480px, 94vw); }
+.silo-body { overflow-y: auto; }
+.silo-body h3 { margin: 6px 0; color: #ffd23a; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
+.market .sub-title { margin-top: 6px; font-size: 12px; }

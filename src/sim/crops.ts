@@ -34,3 +34,13 @@ export const CROPS: Record<CropId, CropDef> = {
 };
 
 export const CROP_IDS: CropId[] = ['wheat', 'corn', 'canola'];
+
+/** Money charged per growing tile sprayed with fertilizer. */
+export const FERTILIZER_COST_PER_TILE = 2;
+/** Extra yield on fertilized tiles (0.4 = +40%). */
+export const FERTILIZER_BONUS = 0.4;
+
+/** Litres harvested from one tile, rounded to whole litres. */
+export function tileYield(crop: CropId, fertilized: boolean): number {
+  return Math.round(CROPS[crop].yieldPerTile * (fertilized ? 1 + FERTILIZER_BONUS : 1));
+}

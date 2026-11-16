@@ -12,6 +12,7 @@ import { lampsOn } from './sim/daylight';
 import { FarmSaves } from './sim/save';
 import { Hud } from './ui/hud';
 import { Shop } from './ui/shop';
+import { Silo } from './ui/silo';
 import { saveControls } from './ui/saveControls';
 
 const STEP = 1 / 60;
@@ -40,6 +41,7 @@ rig.setCabAnchor(tractorView.eye);
 const input = new Input();
 const hud = new Hud(uiRoot, game);
 const shop = new Shop(uiRoot, game, () => (input.enabled = true));
+const silo = new Silo(uiRoot, game, () => (input.enabled = true));
 saveControls(uiRoot, saves, loaded);
 if (loaded.status === 'loaded') hud.toggleHelp(false);
 
@@ -58,20 +60,22 @@ const toggleMute = () => {
 muteBtn.addEventListener('click', toggleMute);
 uiRoot.append(muteBtn);
 
-const paused = () => shop.open || hud.helpVisible;
+const paused = () => shop.open || silo.open || hud.helpVisible;
 
 input.on('Space', () => !paused() && game.toggleLower());
 input.on('KeyE', () => {
   if (shop.open) return shop.close();
+  if (silo.open) return silo.close();
   if (paused()) return;
-  if (game.interact() === 'shop') {
+  const panel = game.interact();
+  if (panel) {
     input.enabled = false;
     game.tractor.speed = 0;
-    shop.show();
+    (panel === 'shop' ? shop : silo).show();
   }
 });
-input.on('Escape', () => (shop.open ? shop.close() : hud.toggleHelp(false)));
-input.on('KeyH', () => !shop.open && hud.toggleHelp());
+input.on('Escape', () => (shop.open ? shop.close() : silo.open ? silo.close() : hud.toggleHelp(false)));
+input.on('KeyH', () => !shop.open && !silo.open && hud.toggleHelp());
 input.on('KeyC', () => game.notify(CAMERA_MODE_NAMES[rig.toggle()], 'info', 0));
 input.on('KeyM', toggleMute);
 CROP_IDS.forEach((id, i) => input.on([`Digit${i + 1}`, `Numpad${i + 1}`], () => !paused() && game.setSeed(id)));

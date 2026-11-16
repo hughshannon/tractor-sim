@@ -53,6 +53,48 @@ describe('farm save data', () => {
     expect(restored.selectTractor('basic').ok).toBe(true);
   });
 
+  it('round trips wear, storage and fertilized tiles', () => {
+    const game = new Game();
+    game.money = 1e6;
+    game.buyStorage();
+    game.buyStorage();
+    game.storage = { wheat: 1200, corn: 0, canola: 340 };
+    game.buyTractor('titan');
+    game.tractorCondition.set('basic', 0.42);
+    game.implementCondition.set('harvester_s', 0.1);
+    const f = game.fields[0];
+    f.harvest(5);
+    f.plow(5);
+    f.seed(5, 'canola');
+    f.fertilize(5);
+    const saved = snapshot(game);
+    const restored = decodeSave(JSON.stringify(saved));
+    expect(snapshot(restored)).toEqual(saved);
+    expect(restored.tractorCondition.get('basic')).toBe(0.42);
+    expect(restored.fields[0].fert[5]).toBe(1);
+    expect(restored.storageCapacity).toBe(25000);
+  });
+
+  it('upgrades a version 1 save with perfect equipment, no storage and no fertilizer', () => {
+    const game = new Game();
+    game.money = 5000;
+    game.fields[0].harvest(0);
+    const v1: Record<string, unknown> = { ...snapshot(game), version: 1 };
+    delete v1.tractorCondition;
+    delete v1.implementCondition;
+    delete v1.storageLevel;
+    delete v1.storage;
+    v1.fields = (v1.fields as Record<string, unknown>[]).map(({ fert: _, ...rest }) => rest);
+    const restored = decodeSave(JSON.stringify(v1));
+    expect(restored.money).toBe(5000);
+    expect(restored.fields[0].state[0]).toBe(TileState.Stubble);
+    expect([...restored.tractorCondition]).toEqual([['basic', 1]]);
+    expect(restored.implementCondition.get('harvester_s')).toBe(1);
+    expect(restored.storageLevel).toBe(0);
+    expect(restored.fields[0].fert.every((v) => v === 0)).toBe(true);
+    expect(snapshot(restored).version).toBe(2);
+  });
+
   it('supports detached equipment and empty inventories of implements', () => {
     const game = new Game();
     game.attach(null);
@@ -88,6 +130,18 @@ describe('farm save data', () => {
     ['bad growth', (s) => { s.fields[0].growth[0] = -0.5; }],
     ['unripe ripe tile', (s) => { s.fields[0].growth[0] = 0.5; }],
     ['crop on grass', (s) => { s.fields[1].crop[0] = 0; }],
+    ['fertilized grass', (s) => { s.fields[1].fert[0] = 1; }],
+    ['bad fertilizer flag', (s) => { s.fields[0].fert[0] = 2; }],
+    ['missing fertilizer', (s) => { s.fields[0].fert.pop(); }],
+    ['condition above 100%', (s) => { s.tractorCondition.basic = 1.5; }],
+    ['negative condition', (s) => { s.implementCondition.plow_s = -0.1; }],
+    ['condition for unowned item', (s) => { (s.tractorCondition as Record<string, number>).pro = 1; }],
+    ['missing condition', (s) => { delete (s.implementCondition as Record<string, number>).plow_s; }],
+    ['unknown storage level', (s) => { s.storageLevel = 9; }],
+    ['storage without a silo', (s) => { s.storage.wheat = 10; }],
+    ['negative storage', (s) => { s.storageLevel = 1; s.storage.corn = -5; }],
+    ['overfilled storage', (s) => { s.storageLevel = 1; s.storage.corn = 99999; }],
+    ['implement too big for tractor', (s) => { s.ownedImplements.push('plow_xl'); s.implementCondition.plow_xl = 1; s.attached = 'plow_xl'; }],
   ];
   it.each(invalid)('rejects %s without mutating the live farm', (_, mutate) => {
     const original = new Game();

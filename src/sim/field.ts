@@ -1,4 +1,4 @@
-import { CROPS, CROP_IDS, type CropId } from './crops';
+import { CROPS, CROP_IDS, tileYield, type CropId } from './crops';
 
 export const TILE_SIZE = 2;
 export const NO_CROP = 255;
@@ -21,6 +21,8 @@ export class Field {
   readonly state: Uint8Array;
   readonly crop: Uint8Array;
   readonly growth: Float32Array;
+  /** 1 where a growing or ripe crop has been fertilized. */
+  readonly fert: Uint8Array;
   /** Incremented whenever a tile's state changes (used by the renderer to know when to redraw). */
   version = 0;
 
@@ -38,6 +40,7 @@ export class Field {
     this.state = new Uint8Array(n);
     this.crop = new Uint8Array(n).fill(NO_CROP);
     this.growth = new Float32Array(n);
+    this.fert = new Uint8Array(n);
   }
 
   get size(): number {
@@ -85,6 +88,7 @@ export class Field {
     this.state[i] = TileState.Plowed;
     this.crop[i] = NO_CROP;
     this.growth[i] = 0;
+    this.fert[i] = 0;
     this.version++;
     return true;
   }
@@ -94,19 +98,36 @@ export class Field {
     this.state[i] = TileState.Seeded;
     this.crop[i] = CROP_IDS.indexOf(crop);
     this.growth[i] = 0;
+    this.fert[i] = 0;
     this.version++;
     return true;
+  }
+
+  /** Fertilize a growing crop. Returns false if the tile is not growing or is already fertilized. */
+  fertilize(i: number): boolean {
+    if (this.state[i] !== TileState.Seeded || this.fert[i]) return false;
+    this.fert[i] = 1;
+    this.version++;
+    return true;
+  }
+
+  /** Litres a ripe tile would yield, or 0. */
+  yieldAt(i: number): number {
+    const crop = this.state[i] === TileState.Ripe ? this.cropAt(i) : null;
+    return crop ? tileYield(crop, this.fert[i] === 1) : 0;
   }
 
   harvest(i: number): HarvestResult | null {
     if (this.state[i] !== TileState.Ripe) return null;
     const crop = this.cropAt(i);
     if (!crop) return null;
+    const amount = this.yieldAt(i);
     this.state[i] = TileState.Stubble;
     this.crop[i] = NO_CROP;
     this.growth[i] = 0;
+    this.fert[i] = 0;
     this.version++;
-    return { crop, amount: CROPS[crop].yieldPerTile };
+    return { crop, amount };
   }
 
   /** Fill every tile with a ripe crop (used for the starting field). */
@@ -114,6 +135,7 @@ export class Field {
     this.state.fill(TileState.Ripe);
     this.crop.fill(CROP_IDS.indexOf(crop));
     this.growth.fill(1);
+    this.fert.fill(0);
     this.version++;
   }
 
