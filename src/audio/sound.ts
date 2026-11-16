@@ -169,6 +169,7 @@ export class SoundEngine {
     this.work.set('plow', voice('lowpass', 320, 1.5)); // soil rumble
     this.work.set('seeder', voice('bandpass', 3200, 1.2)); // seed rattle
     this.work.set('harvester', voice('bandpass', 1100, 0.6)); // cutting / threshing
+    this.work.set('sprayer', voice('highpass', 6000, 0.7)); // nozzle hiss
 
     // Mechanical whir for the harvester reel.
     const whirOsc = ctx.createOscillator();
@@ -223,7 +224,7 @@ export class SoundEngine {
     set(this.engGain.gain, 0.11 + rpm * 0.1 + load * 0.06);
 
     const speedK = Math.min(1, p.speed / 5);
-    const levels: Record<ImplementKind, number> = { plow: 0.5, seeder: 0.07, harvester: 0.16 };
+    const levels: Record<ImplementKind, number> = { plow: 0.5, seeder: 0.07, harvester: 0.16, sprayer: 0.05 };
     for (const [kind, v] of this.work) {
       set(v.gain.gain, p.working === kind ? levels[kind] * (0.4 + 0.6 * speedK) : 0, 0.15);
     }
@@ -250,6 +251,15 @@ export class SoundEngine {
         // Glugging: a few low filtered noise bursts.
         for (let i = 0; i < 6; i++) this.noiseBurst(t + i * 0.11, 0.08, 350 + Math.random() * 150, 0.4, 'bandpass');
         this.tone(900, t + 0.75, 0.15, 0.08, 'sine');
+        break;
+      case 'repair':
+        // Spanner clinks.
+        [0, 0.12, 0.24].forEach((d) => this.tone(2400 + d * 1200, t + d, 0.12, 0.08, 'triangle'));
+        this.noiseBurst(t + 0.3, 0.05, 3000, 0.15, 'bandpass');
+        break;
+      case 'unload':
+        // Grain pouring: a longer soft noise rush.
+        this.noiseBurst(t, 0.9, 1800, 0.25, 'bandpass');
         break;
       case 'attach':
         // Metallic clunk.

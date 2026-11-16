@@ -1,4 +1,5 @@
-import { CROPS, CROP_IDS } from '../sim/crops';
+import { CROPS, CROP_IDS, FERTILIZER_BONUS, FERTILIZER_COST_PER_TILE } from '../sim/crops';
+import { WEAR_THRESHOLD } from '../sim/equipment';
 import { TileState } from '../sim/field';
 import { clockText, nightFactor } from '../sim/daylight';
 import { FUEL_PRICE, Game } from '../sim/game';
@@ -29,6 +30,9 @@ export class Hud {
   private impName = h('div.imp-name');
   private impState = h('div.imp-state');
   private seedRow = h('div.seed-row');
+  private sprayRow = h('div.seed-row.dim');
+  private wear = bar('wear');
+  private wearText = h('span');
   private grainWrap = h('div.grain-row');
   private grain = bar('grain');
   private grainText = h('span');
@@ -43,10 +47,12 @@ export class Hud {
     const stats = h('div.panel.stats', {},
       h('div.row', {}, this.moneyEl, this.clockEl), this.tractorEl,
       h('div.row', {}, h('span.label', {}, 'Fuel'), this.fuel.el, this.fuelText),
+      h('div.row', {}, h('span.label', {}, 'Cond'), this.wear.el, this.wearText),
       this.speedEl,
     );
     this.grainWrap.append(h('span.label', {}, 'Tank'), this.grain.el, this.grainText);
-    const imp = h('div.panel.implement', {}, this.impName, this.impState, this.seedRow, this.grainWrap);
+    this.sprayRow.textContent = `Fertilizer $${FERTILIZER_COST_PER_TILE}/tile · +${Math.round(FERTILIZER_BONUS * 100)}% yield on growing crops`;
+    const imp = h('div.panel.implement', {}, this.impName, this.impState, this.seedRow, this.sprayRow, this.grainWrap);
     this.help = h('div.help', {},
       h('h2', {}, '🚜 Tractor Farm'),
       h('p', {}, 'Harvest the ripe wheat in your Home Field, sell it at the silo, then plow, seed and grow your farm.'),
@@ -64,7 +70,7 @@ export class Hud {
           ['H', 'Show / hide this help'],
         ].map(([k, v]) => h('tr', {}, h('td.key', {}, k), h('td', {}, v))),
       ),
-      h('p.dim', {}, 'Cycle: harvest → plow → seed → wait → harvest. Swap implements at the garage.'),
+      h('p.dim', {}, 'Cycle: harvest → plow → seed → (spray fertilizer) → wait → harvest. Swap implements, repair worn equipment and build grain storage at the garage.'),
       h('button.btn', { onclick: () => this.toggleHelp(false) }, 'Start farming'),
     );
     root.append(stats, this.market, imp, this.fieldEl, this.prompt, this.toasts, this.help);
@@ -89,12 +95,21 @@ export class Hud {
     this.fuel.el.classList.toggle('low', fuelPct < 0.15);
     this.fuelText.textContent = `${Math.round(g.fuel)} L`;
     this.speedEl.textContent = `${Math.round(Math.abs(g.tractor.speed) * 3.6)} km/h${g.tractor.speed < -0.1 ? ' (R)' : ''}`;
+    const tw = g.tractorWear;
+    this.wear.fill.style.width = `${tw * 100}%`;
+    this.wear.el.classList.toggle('low', tw < WEAR_THRESHOLD);
+    this.wearText.textContent = `${Math.round(tw * 100)}%`;
 
     const imp = g.implement;
-    this.impName.textContent = imp ? imp.name : 'No implement';
-    this.impState.textContent = imp ? (g.lowered ? '▼ LOWERED — working' : '▲ Raised  [Space] to lower') : 'Attach one at the garage';
-    this.impState.classList.toggle('on', g.lowered);
+    const iw = g.implementWear;
+    this.impName.textContent = imp ? `${imp.name} · ${Math.round(iw * 100)}%` : 'No implement';
+    this.impName.classList.toggle('worn', imp !== null && iw < WEAR_THRESHOLD);
+    this.impState.textContent = !imp ? 'Attach one at the garage'
+      : iw <= 0 ? '✖ BROKEN — repair at the garage'
+        : g.lowered ? '▼ LOWERED — working' : '▲ Raised  [Space] to lower';
+    this.impState.classList.toggle('on', g.lowered && iw > 0);
     this.seedRow.style.display = imp?.kind === 'seeder' ? '' : 'none';
+    this.sprayRow.style.display = imp?.kind === 'sprayer' ? '' : 'none';
     this.grainWrap.style.display = imp?.kind === 'harvester' || g.grain.amount > 0 ? '' : 'none';
     const cap = def.grainCapacity;
     this.grain.fill.style.width = `${(g.grain.amount / cap) * 100}%`;
@@ -104,6 +119,7 @@ export class Hud {
     const zone = g.zone;
     let prompt = '';
     if (zone?.id === 'shed') prompt = 'Press E to open the garage & shop';
+    else if (zone?.id === 'silo' && g.storageLevel > 0) prompt = 'Press E to open the silo (store or sell grain)';
     else if (zone?.id === 'silo') prompt = g.grain.amount > 0 ? `Press E to sell ${g.grain.amount} L` : 'Silo: bring grain here to sell';
     else if (zone?.id === 'fuel') prompt = `Press E to refuel ($${Math.ceil((def.fuelCapacity - g.fuel) * FUEL_PRICE)})`;
     this.prompt.textContent = prompt;
@@ -136,6 +152,11 @@ export class Hud {
           h(`span.price.t${tr + 1}`, {}, `$${g.price(id).toFixed(2)} ${tr > 0 ? '▲' : tr < 0 ? '▼' : '•'}`),
         );
       }),
+      ...(g.storageLevel > 0
+        ? [h('div.title.sub-title', {}, `Stored ${g.stored.toLocaleString()} / ${g.storageCapacity.toLocaleString()} L`),
+          ...CROP_IDS.filter((id) => g.storage[id] > 0).map((id) =>
+            h('div.row.dim', {}, h('span', {}, CROPS[id].name), h('span', {}, `${g.storage[id].toLocaleString()} L`)))]
+        : []),
     );
 
     this.seedRow.replaceChildren(
@@ -159,13 +180,18 @@ export class Hud {
     if (ti >= 0) {
       const s = f.state[ti] as TileState;
       const crop = f.cropAt(ti);
-      tileText = STATE_NAMES[s] + (crop ? ` ${CROPS[crop].name}` : '') + (s === TileState.Seeded ? ` ${Math.round(f.growth[ti] * 100)}%` : '');
+      tileText = STATE_NAMES[s] + (crop ? ` ${CROPS[crop].name}` : '') + (s === TileState.Seeded ? ` ${Math.round(f.growth[ti] * 100)}%` : '')
+        + (f.fert[ti] ? ' · fertilized' : '');
     }
+    let fertilized = 0;
+    for (let i = 0; i < f.size; i++) fertilized += f.fert[i];
+    const crops = c[TileState.Seeded] + c[TileState.Ripe];
     this.fieldEl.replaceChildren(
       h('div.title', {}, `${f.name}${f.owned ? '' : ' (not owned)'}`),
       ...([TileState.Ripe, TileState.Seeded, TileState.Plowed, TileState.Stubble, TileState.Grass] as TileState[])
         .filter((s) => c[s] > 0)
         .map((s) => h('div.row', {}, h('span', {}, STATE_NAMES[s]), h('span', {}, pct(c[s])))),
+      ...(crops > 0 ? [h('div.row.dim', {}, h('span', {}, 'Fertilized crops'), h('span', {}, `${Math.round((fertilized / crops) * 100)}%`))] : []),
       ...(tileText ? [h('div.dim', {}, `Under implement: ${tileText}`)] : []),
     );
   }

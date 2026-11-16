@@ -150,6 +150,8 @@ export class FieldView {
             } else if (s === TileState.Stubble && px % 2 === 0) {
               k *= 0.9;
             }
+            // Fertilized soil reads darker and richer.
+            if (f.fert[i]) k *= 0.78;
             const o = (Y * w + X) * 4;
             this.data[o] = Math.min(255, base[0] * k);
             this.data[o + 1] = Math.min(255, base[1] * k);
