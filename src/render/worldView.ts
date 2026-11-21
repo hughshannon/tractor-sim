@@ -8,6 +8,7 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
   for (const b of BUILDINGS) if (b.kind !== 'stand') scene.add(buildBuilding(b));
   buildFloodlights(scene, lamps);
   buildFieldLights(scene, fields, lamps);
+  buildBoulders(scene, fields);
 
   for (const z of ZONES) {
     const ring = new THREE.Mesh(
@@ -37,6 +38,11 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
   dirt(150, 5, -5, 10);
   dirt(5, 12, -20, 56);
   dirt(5, 8, 44, 10);
+  // Tracks south from the yard to Boulder Meadow and Rocky Ridge.
+  dirt(5, 22, 36, -28);
+  dirt(18, 5, 43, -38);
+  dirt(5, 32, -36, -33);
+  dirt(10, 5, -41, -47);
 
   // Trees on the outskirts, avoiding fields and the yard.
   const trunks: THREE.Matrix4[] = [];
@@ -45,6 +51,7 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
   const blocked = (x: number, z: number) =>
     (Math.abs(x) < 42 && z > -24 && z < 14) ||
     Math.abs(z - 10) < 4 ||
+    (Math.abs(x - 36) < 4 && z < -14 && z > -42) || (Math.abs(x + 36) < 4 && z < -14 && z > -50) ||
     fields.some((f) => x > f.x - 5 && x < f.x + f.width + 5 && z > f.z - 5 && z < f.z + f.depth + 5);
   for (let i = 0; i < 900 && crowns.length < 240; i++) {
     const x = (hash(i * 2) - 0.5) * (WORLD_HALF * 2 + 60);
@@ -268,4 +275,52 @@ function buildFieldLights(scene: THREE.Scene, fields: Field[], lamps: Lamps): vo
   }), 0.8));
   housings.receiveShadow = true;
   scene.add(housings, caps, pools, flares);
+}
+
+const BOULDER_COLORS = [0x8a8780, 0x7c7a74, 0x969187, 0x6f6c66];
+
+/** A lumpy low-poly rock: a jittered icosahedron, squashed and sunk into the ground. */
+function rock(radius: number, seed: number): THREE.Mesh {
+  const geo = new THREE.IcosahedronGeometry(1, 1);
+  const pos = geo.getAttribute('position');
+  const v = new THREE.Vector3();
+  // Jitter by direction so the duplicated vertices of shared corners move together and the mesh stays closed.
+  for (let i = 0; i < pos.count; i++) {
+    v.fromBufferAttribute(pos, i);
+    const key = Math.round(v.x * 100) * 73856093 ^ Math.round(v.y * 100) * 19349663 ^ Math.round(v.z * 100) * 83492791;
+    v.multiplyScalar(0.8 + hash(key + seed * 7) * 0.35);
+    pos.setXYZ(i, v.x, v.y, v.z);
+  }
+  geo.computeVertexNormals();
+  const m = new THREE.Mesh(geo, mat(BOULDER_COLORS[seed % BOULDER_COLORS.length]));
+  m.scale.set(radius, radius * (0.6 + hash(seed * 3) * 0.2), radius * (0.9 + hash(seed * 5) * 0.2));
+  m.rotation.y = hash(seed * 11) * Math.PI * 2;
+  m.position.y = radius * 0.25;
+  m.castShadow = true;
+  m.receiveShadow = true;
+  return m;
+}
+
+/** Giant boulders on the rocky fields, each with a few smaller stones at its foot. */
+function buildBoulders(scene: THREE.Scene, fields: Field[]): void {
+  let seed = 1;
+  for (const f of fields) {
+    for (const o of f.obstacles) {
+      const g = new THREE.Group();
+      g.position.set(o.x, 0, o.z);
+      g.add(rock(o.radius, seed));
+      for (let k = 0; k < 3; k++) {
+        const a = hash(seed * 17 + k) * Math.PI * 2;
+        const r = o.radius * (0.25 + hash(seed * 19 + k) * 0.15);
+        const stone = rock(r, seed * 31 + k);
+        // Small stones sit just inside the boulder's footprint so they never poke past the collision circle.
+        const d = o.radius - r * 0.6;
+        stone.position.x = Math.sin(a) * d;
+        stone.position.z = Math.cos(a) * d;
+        g.add(stone);
+      }
+      scene.add(g);
+      seed++;
+    }
+  }
 }

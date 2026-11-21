@@ -1,15 +1,15 @@
 import { CROP_IDS, GRAIN_IDS, PRODUCE_IDS } from './crops';
 import { IMPLEMENTS, TRACTORS, canPull } from './equipment';
-import { STORAGE_LEVELS, WORLD_HALF } from './farm';
+import { STORAGE_LEVELS, WORLD_HALF, createFields } from './farm';
 import { NO_CROP, TileState } from './field';
 import { Game } from './game';
 import { PRICE_LEVELS, STAND_LEVELS } from './stand';
 
 export const SAVE_KEY = 'tractor-farm.save';
 export const BACKUP_KEY = 'tractor-farm.previous-save';
-export const SAVE_VERSION = 3;
+export const SAVE_VERSION = 4;
 /** Older versions decodeSave can upgrade. */
-const MIGRATABLE = [1, 2];
+const MIGRATABLE = [1, 2, 3];
 
 /** Only simulation state belongs in a save; definitions and effects stay in code. */
 export function snapshot(game: Game) {
@@ -81,25 +81,42 @@ const conditions = (value: unknown, owned: string[]): value is Record<string, nu
 
 /**
  * Upgrade an older save to the current shape, one version at a time. Version 1 gains equipment in perfect
- * condition, no storage and no fertilized tiles; version 2 gains no loan and an empty roadside cart.
- * The result still goes through full validation.
+ * condition, no storage and no fertilized tiles; version 2 gains no loan and an empty roadside cart;
+ * version 3 gains the boulder fields, unowned and untouched. The result still goes through full validation.
  */
 function migrate(value: RecordValue): RecordValue {
   if (value.version === 1) value = migrate1(value);
-  if (value.version === 2) {
-    return {
-      ...value,
-      version: 3,
-      stats: record(value.stats) ? { ...value.stats, standEarned: 0 } : value.stats,
-      loan: 0,
-      loanMissed: 0,
-      standLevel: 0,
-      standStock: { potato: 0, tomato: 0, pumpkin: 0, sunflower: 0 },
-      standPriceLevel: 1,
-      standToday: 0,
-    };
-  }
+  if (value.version === 2) value = migrate2(value);
+  if (value.version === 3) value = migrate3(value);
   return value;
+}
+
+/** Append fields that were added to the farm after the save was made, in their starting state. */
+function migrate3(value: RecordValue): RecordValue {
+  if (!Array.isArray(value.fields)) return { ...value, version: 4 };
+  const fresh = createFields().slice(value.fields.length).map((f) => ({
+    id: f.id,
+    owned: false,
+    state: Array.from(f.state),
+    crop: Array.from(f.crop),
+    growth: Array.from(f.growth),
+    fert: Array.from(f.fert),
+  }));
+  return { ...value, version: 4, fields: [...value.fields, ...fresh] };
+}
+
+function migrate2(value: RecordValue): RecordValue {
+  return {
+    ...value,
+    version: 3,
+    stats: record(value.stats) ? { ...value.stats, standEarned: 0 } : value.stats,
+    loan: 0,
+    loanMissed: 0,
+    standLevel: 0,
+    standStock: { potato: 0, tomato: 0, pumpkin: 0, sunflower: 0 },
+    standPriceLevel: 1,
+    standToday: 0,
+  };
 }
 
 function migrate1(value: RecordValue): RecordValue {
@@ -170,6 +187,8 @@ function valid(value: unknown, game: Game): value is Save {
       const growth: unknown = saved.growth[i];
       const fert: unknown = saved.fert[i];
       if (fert !== 0 && fert !== 1) return false;
+      // Boulder tiles can never be worked.
+      if (field.blocked[i] && (state !== TileState.Grass || id !== NO_CROP || growth !== 0)) return false;
       if (fert === 1 && state !== TileState.Seeded && state !== TileState.Ripe) return false;
       if (!number(state, TileState.Grass, TileState.Stubble) || !Number.isInteger(state)
         || !number(growth, 0, 1)) return false;
