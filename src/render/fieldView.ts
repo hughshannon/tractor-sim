@@ -23,6 +23,8 @@ const SOIL: Record<TileState, [number, number, number]> = {
   [TileState.Stubble]: [190, 168, 104],
 };
 
+const ROUGH: [number, number, number] = [92, 128, 58];
+
 /** Renders one field: a soil texture with per-tile states and instanced crop models per crop and stage. */
 export class FieldView {
   readonly group = new THREE.Group();
@@ -135,7 +137,8 @@ export class FieldView {
       for (let c = 0; c < f.cols; c++) {
         const i = r * f.cols + c;
         const s = f.state[i] as TileState;
-        let base = SOIL[s];
+        // Rough, darker grass where a boulder sits.
+        let base = f.blocked[i] ? ROUGH : SOIL[s];
         const code = this.tileStage[i];
         if (code !== NO_STAGE) {
           const [tr0, tg, tb, k] = GROUND_TINT[CROP_IDS[code >> 2]][code & 3];

@@ -11,6 +11,16 @@ export enum TileState {
   Stubble = 4,
 }
 
+/** A giant boulder: a circle on the ground that tractors must drive around. */
+export interface Obstacle {
+  x: number;
+  z: number;
+  radius: number;
+}
+
+/** A tile is blocked when a boulder covers more than its edge (a tile it only grazes stays workable). */
+const BLOCK_MARGIN = 0.3;
+
 export interface HarvestResult {
   crop: CropId;
   amount: number;
@@ -23,6 +33,8 @@ export class Field {
   readonly growth: Float32Array;
   /** 1 where a growing or ripe crop has been fertilized. */
   readonly fert: Uint8Array;
+  /** 1 where a boulder sits on the tile: it stays grass and can never be worked. */
+  readonly blocked: Uint8Array;
   /** Incremented whenever a tile's state changes (used by the renderer to know when to redraw). */
   version = 0;
 
@@ -35,12 +47,30 @@ export class Field {
     readonly rows: number,
     readonly price: number,
     public owned: boolean,
+    readonly obstacles: readonly Obstacle[] = [],
   ) {
     const n = cols * rows;
     this.state = new Uint8Array(n);
     this.crop = new Uint8Array(n).fill(NO_CROP);
     this.growth = new Float32Array(n);
     this.fert = new Uint8Array(n);
+    this.blocked = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      const [cx, cz] = this.tileCenter(i);
+      const h = TILE_SIZE / 2;
+      for (const o of obstacles) {
+        // Distance from the boulder centre to the nearest point of the tile square.
+        const dx = Math.max(Math.abs(o.x - cx) - h, 0), dz = Math.max(Math.abs(o.z - cz) - h, 0);
+        if (Math.hypot(dx, dz) < o.radius - BLOCK_MARGIN) this.blocked[i] = 1;
+      }
+    }
+  }
+
+  /** Tiles that can be farmed (not under a boulder). */
+  get workable(): number {
+    let n = this.size;
+    for (let i = 0; i < this.blocked.length; i++) n -= this.blocked[i];
+    return n;
   }
 
   get size(): number {
@@ -84,7 +114,7 @@ export class Field {
 
   plow(i: number): boolean {
     const s = this.state[i];
-    if (s !== TileState.Grass && s !== TileState.Stubble) return false;
+    if (this.blocked[i] || (s !== TileState.Grass && s !== TileState.Stubble)) return false;
     this.state[i] = TileState.Plowed;
     this.crop[i] = NO_CROP;
     this.growth[i] = 0;
@@ -132,10 +162,14 @@ export class Field {
 
   /** Fill every tile with a ripe crop (used for the starting field). */
   fillRipe(crop: CropId): void {
-    this.state.fill(TileState.Ripe);
-    this.crop.fill(CROP_IDS.indexOf(crop));
-    this.growth.fill(1);
-    this.fert.fill(0);
+    const id = CROP_IDS.indexOf(crop);
+    for (let i = 0; i < this.size; i++) {
+      if (this.blocked[i]) continue;
+      this.state[i] = TileState.Ripe;
+      this.crop[i] = id;
+      this.growth[i] = 1;
+      this.fert[i] = 0;
+    }
     this.version++;
   }
 
@@ -158,9 +192,10 @@ export class Field {
     return ripened;
   }
 
+  /** Tile states over the workable tiles (boulder tiles are left out). */
   counts(): Record<TileState, number> {
     const out = { 0: 0, 1: 0, 2: 0, 3: 0, 4: 0 } as Record<TileState, number>;
-    for (let i = 0; i < this.state.length; i++) out[this.state[i] as TileState]++;
+    for (let i = 0; i < this.state.length; i++) if (!this.blocked[i]) out[this.state[i] as TileState]++;
     return out;
   }
 }

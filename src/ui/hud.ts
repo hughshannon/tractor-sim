@@ -188,13 +188,13 @@ export class Hud {
     }
     this.fieldEl.style.display = '';
     const c = f.counts();
-    const pct = (n: number) => `${Math.round((n / f.size) * 100)}%`;
+    const pct = (n: number) => `${Math.round((n / f.workable) * 100)}%`;
     const ti = f.tileAt(p.x, p.z);
     let tileText = '';
     if (ti >= 0) {
       const s = f.state[ti] as TileState;
       const crop = f.cropAt(ti);
-      tileText = STATE_NAMES[s] + (crop ? ` ${CROPS[crop].name}` : '') + (s === TileState.Seeded ? ` ${Math.round(f.growth[ti] * 100)}%` : '')
+      tileText = f.blocked[ti] ? 'Boulder' : STATE_NAMES[s] + (crop ? ` ${CROPS[crop].name}` : '') + (s === TileState.Seeded ? ` ${Math.round(f.growth[ti] * 100)}%` : '')
         + (f.fert[ti] ? ' · fertilized' : '');
     }
     let fertilized = 0;
@@ -206,6 +206,7 @@ export class Hud {
         .filter((s) => c[s] > 0)
         .map((s) => h('div.row', {}, h('span', {}, STATE_NAMES[s]), h('span', {}, pct(c[s])))),
       ...(crops > 0 ? [h('div.row.dim', {}, h('span', {}, 'Fertilized crops'), h('span', {}, `${Math.round((fertilized / crops) * 100)}%`))] : []),
+      ...(f.obstacles.length ? [h('div.row.dim', {}, h('span', {}, 'Boulders'), h('span', {}, `${f.obstacles.length}`))] : []),
       ...(tileText ? [h('div.dim', {}, `Under implement: ${tileText}`)] : []),
     );
   }

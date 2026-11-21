@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { Game } from '../src/sim/game';
 import { NO_CROP, TileState } from '../src/sim/field';
-import { BACKUP_KEY, decodeSave, FarmSaves, SAVE_KEY, snapshot } from '../src/sim/save';
+import { BACKUP_KEY, decodeSave, FarmSaves, SAVE_KEY, SAVE_VERSION, snapshot } from '../src/sim/save';
 
 class MemoryStorage {
   values = new Map<string, string>();
@@ -98,7 +98,7 @@ describe('farm save data', () => {
     expect(restored.storageLevel).toBe(0);
     expect(restored.fields[0].fert.every((v) => v === 0)).toBe(true);
     expect(restored.loan).toBe(0);
-    expect(snapshot(restored).version).toBe(3);
+    expect(snapshot(restored).version).toBe(SAVE_VERSION);
   });
 
   it('upgrades a version 2 save with no loan, an empty cart and fair prices', () => {
@@ -115,7 +115,7 @@ describe('farm save data', () => {
     expect(restored.standLevel).toBe(0);
     expect(restored.standStock).toEqual({ potato: 0, tomato: 0, pumpkin: 0, sunflower: 0 });
     expect(restored.stats).toEqual({ earned: 10, harvested: 20, standEarned: 0 });
-    expect(snapshot(restored).version).toBe(3);
+    expect(snapshot(restored).version).toBe(SAVE_VERSION);
   });
 
   it('round trips loans, the farm stand and vegetable crops', () => {

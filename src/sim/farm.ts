@@ -1,4 +1,4 @@
-import { Field } from './field';
+import { Field, type Obstacle } from './field';
 import type { Box } from './tractor';
 
 export type ZoneId = 'shed' | 'silo' | 'fuel' | 'bank' | 'stand';
@@ -41,8 +41,31 @@ export function createFields(): Field[] {
     new Field(2, 'East Field', 32, 14, 24, 16, 12000, false),
     new Field(3, 'West Field', -84, 14, 26, 20, 15000, false),
     new Field(4, 'North Field', -40, 62, 40, 24, 24000, false),
+    // Cheap land south of the yard, strewn with giant boulders you have to farm around.
+    new Field(5, 'Boulder Meadow', 48, -74, 26, 20, 9000, false, BOULDERS[5]),
+    new Field(6, 'Rocky Ridge', -104, -96, 30, 24, 13000, false, BOULDERS[6]),
   ];
 }
+
+/** Giant boulders per field id, spaced so a tractor can always squeeze between them. */
+export const BOULDERS: Record<number, Obstacle[]> = {
+  5: [
+    { x: 59, z: -61, radius: 2.6 },
+    { x: 77, z: -46, radius: 3.2 },
+    { x: 91, z: -64, radius: 2.3 },
+    { x: 66, z: -42, radius: 1.9 },
+    { x: 84, z: -57, radius: 1.7 },
+  ],
+  6: [
+    { x: -92, z: -84, radius: 3.0 },
+    { x: -75, z: -71, radius: 3.6 },
+    { x: -57, z: -86, radius: 2.4 },
+    { x: -89, z: -59, radius: 2.2 },
+    { x: -61, z: -59, radius: 3.0 },
+    { x: -51, z: -73, radius: 2.0 },
+    { x: -74, z: -89, radius: 1.8 },
+  ],
+};
 
 export function zoneAt(x: number, z: number): Zone | null {
   for (const zone of ZONES) {

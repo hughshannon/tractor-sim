@@ -9,13 +9,13 @@ import {
   type ImplementDef, type TractorDef,
 } from './equipment';
 import { BUILDINGS, STORAGE_LEVELS, WORLD_HALF, createFields, zoneAt, type Zone } from './farm';
-import { Field, TileState } from './field';
+import { Field, TileState, type Obstacle } from './field';
 import { priceAt } from './market';
 import {
   DEFAULT_PRICE_LEVEL, MAX_CUSTOMERS, PRICE_LEVELS, STAND_COUNTER, STAND_LEVELS, WHOLESALE_RATE,
   customerRate, isOpen, makeCustomer, standPrice, timeline, type Customer,
 } from './stand';
-import { createTractor, resolveBox, stepTractor, type DriveInput, type TractorState } from './tractor';
+import { createTractor, resolveBox, resolveCircle, segmentDistance, stepTractor, type DriveInput, type TractorState } from './tractor';
 
 export const FUEL_PRICE = 1.5;
 const LOAN_RATE_PER_SECOND = LOAN_RATE / DAY_LENGTH;
@@ -23,6 +23,8 @@ const money = (n: number) => `$${Math.floor(n).toLocaleString()}`;
 export const START_MONEY = 3000;
 const TRACTOR_RADIUS = 1.6;
 const EMPTY_TANK_SPEED = 2;
+/** Condition an implement loses when it hits a boulder at full working speed. */
+export const BOULDER_DAMAGE = 0.05;
 
 export interface Message {
   text: string;
@@ -40,6 +42,8 @@ export class Game {
   time = 0;
   money = START_MONEY;
   fields: Field[] = createFields();
+  /** Every boulder on the farm, on owned land or not. */
+  readonly boulders: Obstacle[] = this.fields.flatMap((f) => f.obstacles);
   tractor: TractorState = createTractor(0, 4, 0);
   tractorId = 'basic';
   ownedTractors = new Set<string>(['basic']);
@@ -207,6 +211,7 @@ export class Game {
     if (this.fuel <= 0 || tractorWear <= 0) maxSpeed = EMPTY_TANK_SPEED;
     if (tractorWear <= 0) this.notify(`The ${def.name} has broken down! Limp back to the garage for repairs.`, 'warn', 8);
 
+    const before = { x: this.tractor.x, z: this.tractor.z, heading: this.tractor.heading };
     stepTractor(this.tractor, input, dt, {
       maxSpeed,
       maxReverse: 4,
@@ -217,7 +222,17 @@ export class Game {
     const impactSpeed = Math.abs(this.tractor.speed);
     let hit = false;
     for (const b of BUILDINGS) hit = resolveBox(this.tractor, TRACTOR_RADIUS, b.box) || hit;
+    for (const b of this.boulders) hit = resolveCircle(this.tractor, TRACTOR_RADIUS, b) || hit;
     const t = this.tractor;
+    if (this.implementHitsBoulder()) {
+      // A lowered implement can't pass a boulder: stop dead where we were and take damage.
+      t.x = before.x;
+      t.z = before.z;
+      t.heading = before.heading;
+      t.speed = 0;
+      hit = true;
+      this.boulderStrike(impactSpeed);
+    }
     const lim = WORLD_HALF - 2;
     if (Math.abs(t.x) > lim || Math.abs(t.z) > lim) {
       t.x = Math.max(-lim, Math.min(lim, t.x));
@@ -239,6 +254,29 @@ export class Game {
     this.wear(dt, Math.abs(t.speed) * dt);
 
     for (const f of this.fields) f.update(dt);
+  }
+
+  /** True when the lowered implement's working bar overlaps a boulder. */
+  implementHitsBoulder(): boolean {
+    const imp = this.implement;
+    if (!imp || this.lowerAnim < 0.5) return false;
+    const p = this.implementPos();
+    const h = this.tractor.heading;
+    const rx = -Math.cos(h) * imp.width / 2, rz = Math.sin(h) * imp.width / 2;
+    return this.boulders.some((b) => segmentDistance(b.x, b.z, p.x - rx, p.z - rz, p.x + rx, p.z + rz) < b.radius);
+  }
+
+  private boulderStrike(speed: number): void {
+    const imp = this.implement!;
+    if (speed > 1) {
+      const before = this.implementWear;
+      const after = Math.max(0, before - BOULDER_DAMAGE * Math.min(1, speed / imp.workSpeed));
+      this.implementCondition.set(imp.id, after);
+      this.notify(`The ${imp.name} hit a boulder! Raise it (Space) or steer around.`, 'warn', 2);
+      if (before > 0 && after <= 0) this.notify(`The ${imp.name} is broken. Repair it at the garage.`, 'warn', 0);
+    } else {
+      this.notify('A boulder is in the way of your implement. Raise it (Space) or steer around.', 'warn', 6);
+    }
   }
 
   /** Wear the current tractor by distance driven and the implement by time spent working. */

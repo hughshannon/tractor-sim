@@ -35,6 +35,11 @@ Swap implements (plow, seeder, sprayer, harvester) at the garage. Prices drift o
   work slower and burn more fuel; at 0% they stop. Repair at the garage workshop.
 - **Equipment tiers**: Scout 50 (fast utility), Workhorse 200, Titan 400; 9 m implements need 180 hp.
 
+**Boulder fields:** two cheap plots south of the yard, **Boulder Meadow** ($9,000) and **Rocky Ridge** ($13,000), are
+strewn with giant boulders. The tractor can't drive through them, and the ground under each one can never be farmed. A
+lowered implement that hits a boulder stops the tractor dead and takes damage, so steer wide implements around them
+or raise them (Space) to get past.
+
 **Vegetables & the farm stand:** potatoes, tomatoes, pumpkins and sunflowers are planted, grown and harvested like
 grain, but the silo won't take them. Drive to the **farm stand** by the road (east of the silo) and press E to stock it from
 the tank. Between 07:00 and 20:00 customers walk in from the road and buy what's on the counter. More kinds of produce

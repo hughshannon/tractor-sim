@@ -107,3 +107,26 @@ export function resolveBox(s: TractorState, r: number, b: Box): boolean {
   s.speed *= 0.3;
   return true;
 }
+
+/** Push a circle of radius r at the tractor position out of another circle. Returns true on collision. */
+export function resolveCircle(s: TractorState, r: number, c: { x: number; z: number; radius: number }): boolean {
+  const dx = s.x - c.x, dz = s.z - c.z;
+  const min = r + c.radius;
+  const d2 = dx * dx + dz * dz;
+  if (d2 >= min * min) return false;
+  const d = Math.sqrt(d2);
+  // Dead centre: push out along the heading's reverse so the tractor backs off the way it came.
+  const nx = d > 1e-6 ? dx / d : -Math.sin(s.heading), nz = d > 1e-6 ? dz / d : -Math.cos(s.heading);
+  s.x = c.x + nx * min;
+  s.z = c.z + nz * min;
+  s.speed *= 0.3;
+  return true;
+}
+
+/** Shortest distance from point (px, pz) to the segment a–b. */
+export function segmentDistance(px: number, pz: number, ax: number, az: number, bx: number, bz: number): number {
+  const vx = bx - ax, vz = bz - az;
+  const len2 = vx * vx + vz * vz;
+  const t = len2 > 0 ? Math.max(0, Math.min(1, ((px - ax) * vx + (pz - az) * vz) / len2)) : 0;
+  return Math.hypot(px - (ax + vx * t), pz - (az + vz * t));
+}

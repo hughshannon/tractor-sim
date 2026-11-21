@@ -95,7 +95,8 @@ export class Shop {
 
     const fieldRows = g.fields.map((f) =>
       h('div.item', {},
-        h('div', {}, h('b', {}, f.name), h('div.dim', {}, `${f.hectares.toFixed(2)} ha · ${f.size} tiles`)),
+        h('div', {}, h('b', {}, f.name), h('div.dim', {}, `${f.hectares.toFixed(2)} ha · ${f.workable} tiles`
+          + (f.obstacles.length ? ` · ${f.obstacles.length} giant boulders to drive around` : ''))),
         f.owned
           ? h('span.tag', {}, 'Owned')
           : h('button.btn.buy', { disabled: g.money < f.price, onclick: () => this.act(g.buyField(f.id)) }, `Buy ${money(f.price)}`),
