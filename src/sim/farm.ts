@@ -1,7 +1,7 @@
 import { Field } from './field';
 import type { Box } from './tractor';
 
-export type ZoneId = 'shed' | 'silo' | 'fuel';
+export type ZoneId = 'shed' | 'silo' | 'fuel' | 'bank' | 'stand';
 
 export interface Zone {
   id: ZoneId;
@@ -12,7 +12,7 @@ export interface Zone {
 }
 
 export interface Building {
-  kind: 'shed' | 'silo' | 'pump';
+  kind: 'shed' | 'silo' | 'pump' | 'bank' | 'stand';
   box: Box;
 }
 
@@ -22,12 +22,17 @@ export const BUILDINGS: Building[] = [
   { kind: 'shed', box: { minX: -22, minZ: -16, maxX: -8, maxZ: -6 } },
   { kind: 'silo', box: { minX: 10, minZ: -16, maxX: 20, maxZ: -6 } },
   { kind: 'pump', box: { minX: -1, minZ: -12, maxX: 1, maxZ: -11 } },
+  { kind: 'bank', box: { minX: -34, minZ: -13, maxX: -26, maxZ: -6 } },
+  /** Roadside stand: the counter faces the road (+Z); the tractor restocks it from the yard side. */
+  { kind: 'stand', box: { minX: 26, minZ: -1, maxX: 32, maxZ: 2 } },
 ];
 
 export const ZONES: Zone[] = [
   { id: 'shed', x: -15, z: -2, radius: 4.5, label: 'GARAGE & SHOP' },
   { id: 'silo', x: 15, z: -2, radius: 4.5, label: 'SELL GRAIN' },
   { id: 'fuel', x: 0, z: -7, radius: 3.5, label: 'FUEL' },
+  { id: 'bank', x: -30, z: -2, radius: 3.5, label: 'BANK' },
+  { id: 'stand', x: 29, z: -5, radius: 3.5, label: 'FARM STAND' },
 ];
 
 export function createFields(): Field[] {

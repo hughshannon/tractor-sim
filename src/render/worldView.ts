@@ -5,7 +5,7 @@ import { Lamps, glowMaterial, glowTexture } from './lighting';
 import { box, cyl, hash, labelSprite, mat } from './util';
 
 export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): void {
-  for (const b of BUILDINGS) scene.add(buildBuilding(b));
+  for (const b of BUILDINGS) if (b.kind !== 'stand') scene.add(buildBuilding(b));
   buildFloodlights(scene, lamps);
   buildFieldLights(scene, fields, lamps);
 
@@ -32,7 +32,7 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
     m.receiveShadow = true;
     scene.add(m);
   };
-  dirt(50, 22, 0, -6, 0xb09c72);
+  dirt(74, 22, 0, -6, 0xb09c72);
   dirt(6, 14, 0, 7);
   dirt(150, 5, -5, 10);
   dirt(5, 12, -20, 56);
@@ -43,7 +43,7 @@ export function buildWorld(scene: THREE.Scene, fields: Field[], lamps: Lamps): v
   const crowns: THREE.Matrix4[] = [];
   const m = new THREE.Matrix4();
   const blocked = (x: number, z: number) =>
-    (Math.abs(x) < 34 && z > -24 && z < 14) ||
+    (Math.abs(x) < 42 && z > -24 && z < 14) ||
     Math.abs(z - 10) < 4 ||
     fields.some((f) => x > f.x - 5 && x < f.x + f.width + 5 && z > f.z - 5 && z < f.z + f.depth + 5);
   for (let i = 0; i < 900 && crowns.length < 240; i++) {
@@ -118,6 +118,32 @@ function buildBuilding(b: Building): THREE.Group {
     // Intake pit and office.
     g.add(box(4, 0.3, 2, 0x555555, 0, 0.15, d / 2 - 0.8));
     g.add(box(3, 2.6, 2.4, 0xe8dcc0, 3.2, 1.3, 2.8));
+  } else if (b.kind === 'bank') {
+    // Small country bank: stone walls, a pediment on four columns and steps facing the yard (+Z).
+    const h = 4.2;
+    g.add(box(w, h, d - 1.4, 0xe8e0cc, 0, h / 2, -0.7));
+    g.add(box(w + 0.4, 0.4, d - 1.0, 0xcfc6b0, 0, h + 0.2, -0.7));
+    const ped = new THREE.Shape();
+    ped.moveTo(-w / 2 - 0.2, 0);
+    ped.lineTo(0, 1.3);
+    ped.lineTo(w / 2 + 0.2, 0);
+    ped.lineTo(-w / 2 - 0.2, 0);
+    const pedGeo = new THREE.ExtrudeGeometry(ped, { depth: 1.6, bevelEnabled: false });
+    pedGeo.translate(0, h + 0.4, d / 2 - 1.6);
+    const pedMesh = new THREE.Mesh(pedGeo, mat(0xd8d0bc));
+    pedMesh.castShadow = true;
+    g.add(pedMesh);
+    for (const x of [-2.9, -1.1, 1.1, 2.9]) {
+      const c = cyl(0.22, 0.26, h, 0xf4f0e6, 10);
+      c.position.set(x, h / 2 + 0.25, d / 2 - 0.5);
+      g.add(c);
+    }
+    g.add(box(w, 0.25, 1.6, 0xbfb8a8, 0, 0.125, d / 2 - 0.6));
+    g.add(box(1.6, 2.6, 0.1, 0x2e5a3a, 0, 1.3, d / 2 - 1.36));
+    g.add(box(1.0, 1.2, 0.1, 0x6f8796, -2.4, 2.2, d / 2 - 1.36), box(1.0, 1.2, 0.1, 0x6f8796, 2.4, 2.2, d / 2 - 1.36));
+    const sign = labelSprite('$ FARM BANK $', { bg: 'rgba(30,50,40,0.9)', fg: '#ffd23a', scale: 0.6 });
+    sign.position.set(0, h + 0.9, d / 2 + 0.2);
+    g.add(sign);
   } else {
     g.add(box(w, 2.2, d, 0xd8d8d8, 0, 1.1, 0));
     g.add(box(w + 0.1, 0.5, d + 0.1, 0xd23a2a, 0, 2.0, 0));

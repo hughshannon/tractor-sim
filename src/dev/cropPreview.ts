@@ -1,6 +1,7 @@
 /**
  * Dev-only page (npm run dev, then open /crops.html) showing every crop at several growth points,
- * rendered with the real FieldView. Rows: wheat, corn, canola. Columns: increasing growth, then ripe.
+ * rendered with the real FieldView. Rows: wheat, corn, canola, potatoes, tomatoes, pumpkins, sunflowers.
+ * Columns: increasing growth, then ripe.
  * Drag to orbit, scroll to zoom.
  */
 import * as THREE from 'three';

@@ -1,4 +1,4 @@
-import { CROPS, CROP_IDS } from '../sim/crops';
+import { CROPS, GRAIN_IDS, amountText, isGrain } from '../sim/crops';
 import type { ActionResult, Game } from '../sim/game';
 import { priceTrend } from '../sim/market';
 import { h, money } from './dom';
@@ -51,17 +51,20 @@ export class Silo {
     const space = g.storageCapacity - g.stored;
 
     const tank = h('section', {}, h('h3', {}, 'Tractor tank'),
-      crop && amount > 0
-        ? h('div.item', {},
+      !crop || amount <= 0
+        ? h('div.item', {}, h('span.dim', {}, 'Tank is empty.'))
+        : !isGrain(crop)
+        ? h('div.item', {}, h('div', {}, h('b', {}, amountText(crop, amount)),
+          h('div.dim', {}, 'The silo only takes grain. Sell produce at the farm stand.')))
+        : h('div.item', {},
           h('div', {}, h('b', {}, `${amount.toLocaleString()} L ${CROPS[crop].name}`),
             h('div.dim', {}, `Worth ${money(amount * g.price(crop))} now at $${g.price(crop).toFixed(2)}/L`)),
           h('div.btns', {},
             h('button.btn', { disabled: space <= 0, onclick: () => this.act(g.unloadGrain()) }, 'Store'),
-            h('button.btn.buy', { onclick: () => this.act(g.sellGrain()) }, 'Sell')))
-        : h('div.item', {}, h('span.dim', {}, 'Tank is empty.')),
+            h('button.btn.buy', { onclick: () => this.act(g.sellGrain()) }, 'Sell'))),
     );
 
-    const rows = CROP_IDS.map((id) => {
+    const rows = GRAIN_IDS.map((id) => {
       const litres = g.storage[id];
       const price = g.price(id);
       const tr = priceTrend(id, g.time);

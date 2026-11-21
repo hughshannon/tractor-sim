@@ -107,7 +107,8 @@ export class Shop {
       const active = g.seedCrop === id;
       return h(`div.item${active ? '.active' : ''}`, {},
         h('div', {}, h('b', {}, c.name),
-          h('div.dim', {}, `$${c.seedCostPerTile}/tile · grows in ${c.growTime}s · ${c.yieldPerTile} L/tile · ~$${c.basePrice.toFixed(2)}/L`)),
+          h('div.dim', {}, `$${c.seedCostPerTile}/tile · grows in ${c.growTime}s · ${c.yieldPerTile} ${c.unit}/tile · ~$${c.basePrice.toFixed(2)}/${c.unit}`
+            + (c.kind === 'produce' ? ' · sell at the farm stand' : ''))),
         active ? h('span.tag', {}, 'Selected') : h('button.btn', { onclick: () => { g.seedCrop = id; this.act({ ok: true, text: `Seed set to ${c.name}.` }); } }, 'Select'),
       );
     });

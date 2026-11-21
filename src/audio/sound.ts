@@ -244,6 +244,15 @@ export class SoundEngine {
         this.tone(2637, t + 0.09, 0.5, 0.06, 'sine');
         this.noiseBurst(t, 0.05, 4000, 0.15, 'highpass');
         break;
+      case 'customer':
+        // A small shop bell.
+        this.tone(2093, t, 0.35, 0.07, 'triangle');
+        this.tone(2637, t + 0.06, 0.4, 0.05, 'sine');
+        break;
+      case 'loan':
+        // Counting coins.
+        [0, 0.07, 0.14].forEach((d) => this.tone(3136 - d * 2000, t + d, 0.1, 0.07, 'triangle'));
+        break;
       case 'buy':
         [523, 659, 784, 1047].forEach((f, i) => this.tone(f, t + i * 0.07, 0.25, 0.12, 'square'));
         break;

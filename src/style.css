@@ -115,3 +115,11 @@ body { font: 14px/1.35 system-ui, -apple-system, 'Segoe UI', sans-serif; color: 
 .silo-body { overflow-y: auto; }
 .silo-body h3 { margin: 6px 0; color: #ffd23a; font-size: 14px; text-transform: uppercase; letter-spacing: 0.05em; }
 .market .sub-title { margin-top: 6px; font-size: 12px; }
+
+/* Bank, farm stand */
+.stats .loan { color: #ffb05a; font-size: 13px; font-weight: 700; margin: -2px 0 2px; }
+.stats .loan.late { color: #ff8a7a; }
+.tag.late { color: #ff8a7a; }
+.seed-row { flex-wrap: wrap; max-width: 560px; margin-left: auto; margin-right: auto; }
+.chip.veg:not(.active) { background: rgba(240, 130, 40, 0.22); }
+.item.stock { flex-direction: column; align-items: stretch; gap: 3px; }
