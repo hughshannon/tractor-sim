@@ -6,13 +6,16 @@ import { FieldView } from './render/fieldView';
 import { DayNight, Lamps } from './render/lighting';
 import { createScene } from './render/scene';
 import { TractorView } from './render/tractorView';
+import { StandView } from './render/standView';
 import { buildWorld } from './render/worldView';
 import { CROP_IDS } from './sim/crops';
 import { lampsOn } from './sim/daylight';
 import { FarmSaves } from './sim/save';
+import { Bank } from './ui/bank';
 import { Hud } from './ui/hud';
 import { Shop } from './ui/shop';
 import { Silo } from './ui/silo';
+import { Stand } from './ui/stand';
 import { saveControls } from './ui/saveControls';
 
 const STEP = 1 / 60;
@@ -26,6 +29,7 @@ const game = loaded.game;
 const { renderer, scene, camera, sun, hemi } = createScene(container);
 const farmLamps = new Lamps();
 buildWorld(scene, game.fields, farmLamps);
+const standView = new StandView(scene, farmLamps);
 const dayNight = new DayNight(scene, sun, hemi);
 let lampLevel = lampsOn(game.time) ? 1 : 0;
 const fieldViews = game.fields.map((f) => {
@@ -42,6 +46,8 @@ const input = new Input();
 const hud = new Hud(uiRoot, game);
 const shop = new Shop(uiRoot, game, () => (input.enabled = true));
 const silo = new Silo(uiRoot, game, () => (input.enabled = true));
+const bank = new Bank(uiRoot, game, () => (input.enabled = true));
+const stand = new Stand(uiRoot, game, () => (input.enabled = true));
 saveControls(uiRoot, saves, loaded);
 if (loaded.status === 'loaded') hud.toggleHelp(false);
 
@@ -60,22 +66,28 @@ const toggleMute = () => {
 muteBtn.addEventListener('click', toggleMute);
 uiRoot.append(muteBtn);
 
-const paused = () => shop.open || silo.open || hud.helpVisible;
+const panels = { shop, silo, bank, stand };
+const openPanel = () => Object.values(panels).find((p) => p.open);
+const paused = () => openPanel() !== undefined || hud.helpVisible;
 
 input.on('Space', () => !paused() && game.toggleLower());
 input.on('KeyE', () => {
-  if (shop.open) return shop.close();
-  if (silo.open) return silo.close();
+  const open = openPanel();
+  if (open) return open.close();
   if (paused()) return;
   const panel = game.interact();
   if (panel) {
     input.enabled = false;
     game.tractor.speed = 0;
-    (panel === 'shop' ? shop : silo).show();
+    panels[panel].show();
   }
 });
-input.on('Escape', () => (shop.open ? shop.close() : silo.open ? silo.close() : hud.toggleHelp(false)));
-input.on('KeyH', () => !shop.open && !silo.open && hud.toggleHelp());
+input.on('Escape', () => {
+  const open = openPanel();
+  if (open) open.close();
+  else hud.toggleHelp(false);
+});
+input.on('KeyH', () => !openPanel() && hud.toggleHelp());
 input.on('KeyC', () => game.notify(CAMERA_MODE_NAMES[rig.toggle()], 'info', 0));
 input.on('KeyM', toggleMute);
 CROP_IDS.forEach((id, i) => input.on([`Digit${i + 1}`, `Numpad${i + 1}`], () => !paused() && game.setSeed(id)));
@@ -103,6 +115,7 @@ function frame(now: number) {
   tractorView.setImplement(game.implement);
   tractorView.update(t, game.lowerAnim, now / 1000);
   for (const v of fieldViews) v.update(dt);
+  standView.update(game, now / 1000);
   rig.update(t, dt);
   // Sky, sun/moon (shadow frustum centred on the tractor) and lamps that fade on at dusk.
   dayNight.update(game.time, t, camera);

@@ -1,4 +1,9 @@
-import { CROPS, CROP_IDS, FERTILIZER_COST_PER_TILE, type CropId } from './crops';
+import { LOAN_RATE, creditLimit, instalment, lateFee } from './bank';
+import {
+  CROPS, FERTILIZER_COST_PER_TILE, GRAIN_IDS, PRODUCE_IDS, amountText, isGrain, isProduce,
+  type CropId, type GrainId, type ProduceId,
+} from './crops';
+import { DAY_LENGTH } from './daylight';
 import {
   IMPLEMENTS, IMPLEMENT_LIFE, TRACTORS, TRACTOR_LIFE, canPull, repairCost, wearFuel, wearSpeed,
   type ImplementDef, type TractorDef,
@@ -6,9 +11,15 @@ import {
 import { BUILDINGS, STORAGE_LEVELS, WORLD_HALF, createFields, zoneAt, type Zone } from './farm';
 import { Field, TileState } from './field';
 import { priceAt } from './market';
+import {
+  DEFAULT_PRICE_LEVEL, MAX_CUSTOMERS, PRICE_LEVELS, STAND_COUNTER, STAND_LEVELS, WHOLESALE_RATE,
+  customerRate, isOpen, makeCustomer, standPrice, timeline, type Customer,
+} from './stand';
 import { createTractor, resolveBox, stepTractor, type DriveInput, type TractorState } from './tractor';
 
 export const FUEL_PRICE = 1.5;
+const LOAN_RATE_PER_SECOND = LOAN_RATE / DAY_LENGTH;
+const money = (n: number) => `$${Math.floor(n).toLocaleString()}`;
 export const START_MONEY = 3000;
 const TRACTOR_RADIUS = 1.6;
 const EMPTY_TANK_SPEED = 2;
@@ -21,7 +32,7 @@ export interface Message {
 
 export type GameEvent =
   | 'sell' | 'refuel' | 'buy' | 'attach' | 'warn' | 'bump'
-  | 'lower' | 'raise' | 'repair' | 'unload';
+  | 'lower' | 'raise' | 'repair' | 'unload' | 'loan' | 'customer';
 
 export type ActionResult = { ok: true; text: string } | { ok: false; text: string };
 
@@ -41,19 +52,33 @@ export class Game {
   fuel: number;
   grain: { crop: CropId | null; amount: number } = { crop: null, amount: 0 };
   messages: Message[] = [];
-  stats = { earned: 0, harvested: 0 };
+  stats = { earned: 0, harvested: 0, standEarned: 0 };
   /** Condition 0..1 of every owned tractor and implement, keyed by id. */
   tractorCondition = new Map<string, number>([['basic', 1]]);
   implementCondition = new Map<string, number>([['plow_s', 1], ['seeder_s', 1], ['harvester_s', 1]]);
   /** Silo storage upgrade level (index into STORAGE_LEVELS) and stored grain per crop. */
   storageLevel = 0;
-  storage: Record<CropId, number> = { wheat: 0, corn: 0, canola: 0 };
+  storage: Record<GrainId, number> = { wheat: 0, corn: 0, canola: 0 };
+  /** Outstanding bank loan (with accrued interest) and consecutive missed morning instalments. */
+  loan = 0;
+  loanMissed = 0;
+  /** Farm stand upgrade level (index into STAND_LEVELS), stock per produce, price setting, takings today. */
+  standLevel = 0;
+  standStock: Record<ProduceId, number> = { potato: 0, tomato: 0, pumpkin: 0, sunflower: 0 };
+  standPriceLevel = DEFAULT_PRICE_LEVEL;
+  standToday = 0;
+  /** Customers currently walking to, at, or away from the stand. Not saved. */
+  customers: Customer[] = [];
+  /** Randomness for customers; replaceable in tests. */
+  random: () => number = Math.random;
   /** True during frames where the implement is actually engaging the ground. */
   workingNow = false;
   /** Optional listener for sound/effects; the sim never depends on it. */
   onEvent: ((e: GameEvent) => void) | null = null;
   private lastNotice = new Map<string, number>();
   private lastBump = -10;
+  private nextCustomer = 1;
+  private customerId = 0;
 
   constructor() {
     this.fuel = this.tractorDef.fuelCapacity;
@@ -81,7 +106,40 @@ export class Game {
   }
 
   get stored(): number {
-    return CROP_IDS.reduce((n, id) => n + this.storage[id], 0);
+    return GRAIN_IDS.reduce((n, id) => n + this.storage[id], 0);
+  }
+
+  get standCapacity(): number {
+    return STAND_LEVELS[this.standLevel].capacity;
+  }
+
+  get standStocked(): number {
+    return PRODUCE_IDS.reduce((n, id) => n + this.standStock[id], 0);
+  }
+
+  /** What the bank values the farm's purchases at: land, buildings and bought equipment. */
+  get assets(): number {
+    let n = 0;
+    for (const f of this.fields) if (f.owned) n += f.price;
+    for (const id of this.ownedTractors) n += TRACTORS[id].price;
+    for (const id of this.ownedImplements) n += IMPLEMENTS[id].price;
+    for (let i = 1; i <= this.storageLevel; i++) n += STORAGE_LEVELS[i].price;
+    for (let i = 1; i <= this.standLevel; i++) n += STAND_LEVELS[i].price;
+    return n;
+  }
+
+  get creditLimit(): number {
+    return creditLimit(this.assets);
+  }
+
+  /** How much more the bank will lend right now. */
+  get creditAvailable(): number {
+    return Math.max(0, this.creditLimit - Math.ceil(this.loan));
+  }
+
+  /** Seconds until the next morning instalment. */
+  get nextPaymentIn(): number {
+    return DAY_LENGTH - (this.time % DAY_LENGTH);
   }
 
   get zone(): Zone | null {
@@ -101,8 +159,14 @@ export class Game {
     this.onEvent?.(e);
   }
 
-  price(crop: CropId): number {
+  /** Silo price for grain. */
+  price(crop: GrainId): number {
     return priceAt(crop, this.time);
+  }
+
+  /** Farm stand price for produce at the current price setting. */
+  standPrice(crop: ProduceId): number {
+    return standPrice(crop, this.standPriceLevel);
   }
 
   fieldAt(x: number, z: number): Field | null {
@@ -118,7 +182,11 @@ export class Game {
   }
 
   update(dt: number, input: DriveInput): void {
+    const day = Math.floor(this.time / DAY_LENGTH);
     this.time += dt;
+    this.accrueInterest(dt);
+    if (Math.floor(this.time / DAY_LENGTH) > day) this.newDay();
+    this.updateStand(dt);
     const def = this.tractorDef;
     const imp = this.implement;
 
@@ -129,6 +197,9 @@ export class Game {
     const burn = (0.04 + 0.16 * Math.abs(input.throttle)) * (working ? imp.fuelMul * wearFuel(impWear) : 1) * wearFuel(tractorWear);
     this.fuel = Math.max(0, this.fuel - burn * dt);
     if (this.fuel <= 0) this.notify('Out of fuel! Crawl back to the fuel pump.', 'warn', 6);
+    if (this.money < 100 && this.creditAvailable >= 1000 && this.time > 5) {
+      this.notify('Running low on money? The bank, west of the garage, can lend you some.', 'info', 120);
+    }
     else if (this.fuel < def.fuelCapacity * 0.15) this.notify('Fuel is low.', 'warn', 20);
 
     let maxSpeed = def.maxSpeed * wearSpeed(tractorWear);
@@ -227,7 +298,7 @@ export class Game {
         if (field.state[i] !== TileState.Plowed) return true;
         const cost = CROPS[this.seedCrop].seedCostPerTile;
         if (this.money < cost) {
-          this.notify('Not enough money for seed.', 'warn');
+          this.notify(`Not enough money for seed.${this.bankHint()}`, 'warn');
           return false;
         }
         if (field.seed(i, this.seedCrop)) this.money -= cost;
@@ -236,7 +307,7 @@ export class Game {
       case 'sprayer': {
         if (field.state[i] !== TileState.Seeded || field.fert[i]) return true;
         if (this.money < FERTILIZER_COST_PER_TILE) {
-          this.notify('Not enough money for fertilizer.', 'warn');
+          this.notify(`Not enough money for fertilizer.${this.bankHint()}`, 'warn');
           return false;
         }
         if (field.fertilize(i)) this.money -= FERTILIZER_COST_PER_TILE;
@@ -246,11 +317,12 @@ export class Game {
         if (field.state[i] !== TileState.Ripe) return true;
         const crop = field.cropAt(i)!;
         if (this.grain.amount > 0 && this.grain.crop !== crop) {
-          this.notify(`Tank holds ${CROPS[this.grain.crop!].name}. Sell it before harvesting ${CROPS[crop].name}.`, 'warn');
+          const where = isGrain(this.grain.crop!) ? 'at the silo' : 'at the farm stand';
+          this.notify(`Tank holds ${CROPS[this.grain.crop!].name}. Unload it ${where} before harvesting ${CROPS[crop].name}.`, 'warn');
           return false;
         }
         if (this.grain.amount + field.yieldAt(i) > this.tractorDef.grainCapacity) {
-          this.notify('Grain tank full! Unload at the silo.', 'warn');
+          this.notify(isGrain(crop) ? 'Grain tank full! Unload at the silo.' : 'Tank full! Unload the produce at the farm stand.', 'warn');
           return false;
         }
         const r = field.harvest(i)!;
@@ -275,10 +347,12 @@ export class Game {
    * Context action for the zone the tractor is in. Returns which panel should open, if any.
    * Without storage the silo sells straight from the tank; with storage it opens the silo panel.
    */
-  interact(): 'shop' | 'silo' | null {
+  interact(): 'shop' | 'silo' | 'bank' | 'stand' | null {
     const z = this.zone;
     if (!z) return null;
     if (z.id === 'shed') return 'shop';
+    if (z.id === 'bank') return 'bank';
+    if (z.id === 'stand') return 'stand';
     if (z.id === 'silo') {
       if (this.storageLevel > 0) return 'silo';
       this.report(this.sellGrain());
@@ -294,6 +368,7 @@ export class Game {
   sellGrain(): ActionResult {
     const { crop, amount } = this.grain;
     if (!crop || amount <= 0) return { ok: false, text: 'Grain tank is empty.' };
+    if (!isGrain(crop)) return { ok: false, text: `The silo only buys grain. Take the ${CROPS[crop].name} to the farm stand.` };
     const total = Math.round(amount * this.price(crop));
     this.money += total;
     this.stats.earned += total;
@@ -306,6 +381,7 @@ export class Game {
   unloadGrain(): ActionResult {
     const { crop, amount } = this.grain;
     if (!crop || amount <= 0) return { ok: false, text: 'Grain tank is empty.' };
+    if (!isGrain(crop)) return { ok: false, text: `The silo only stores grain. Take the ${CROPS[crop].name} to the farm stand.` };
     const space = this.storageCapacity - this.stored;
     if (space <= 0) return { ok: false, text: 'Storage is full. Sell some grain or upgrade storage.' };
     const moved = Math.min(space, amount);
@@ -317,7 +393,7 @@ export class Game {
   }
 
   /** Sell stored grain of one crop at today's price (all of it unless an amount is given). */
-  sellStored(crop: CropId, amount = this.storage[crop]): ActionResult {
+  sellStored(crop: GrainId, amount = this.storage[crop]): ActionResult {
     const litres = Math.min(amount, this.storage[crop]);
     if (litres <= 0) return { ok: false, text: `No ${CROPS[crop].name} in storage.` };
     const total = Math.round(litres * this.price(crop));
@@ -385,7 +461,7 @@ export class Game {
     const need = this.tractorDef.fuelCapacity - this.fuel;
     if (need < 0.5) return { ok: false, text: 'Tank is already full.' };
     const litres = Math.min(need, this.money / FUEL_PRICE);
-    if (litres < 0.5) return { ok: false, text: 'Not enough money for fuel.' };
+    if (litres < 0.5) return { ok: false, text: `Not enough money for fuel.${this.bankHint()}` };
     const cost = Math.ceil(litres * FUEL_PRICE);
     this.money -= cost;
     this.fuel += litres;
@@ -394,7 +470,7 @@ export class Game {
   }
 
   private spend(price: number, what: string): ActionResult | null {
-    if (this.money < price) return { ok: false, text: `Not enough money for ${what}.` };
+    if (this.money < price) return { ok: false, text: `Not enough money for ${what}.${this.bankHint()}` };
     this.money -= price;
     return null;
   }
@@ -461,6 +537,174 @@ export class Game {
     f.owned = true;
     this.emit('buy');
     return { ok: true, text: `Bought ${f.name}!` };
+  }
+
+  // ---- Bank ---------------------------------------------------------------------------------
+
+  private bankHint(): string {
+    return this.creditAvailable >= 500 ? ' The bank can lend you money.' : '';
+  }
+
+  private accrueInterest(dt: number): void {
+    if (this.loan > 0) this.loan += this.loan * LOAN_RATE_PER_SECOND * dt;
+  }
+
+  /** Morning: collect the loan instalment and report yesterday's stand takings. */
+  private newDay(): void {
+    if (this.standToday > 0) this.notify(`The farm stand took ${money(this.standToday)} yesterday.`, 'good', 0);
+    this.standToday = 0;
+    if (this.loan <= 0) return;
+    const due = instalment(this.loan);
+    if (this.money >= due) {
+      this.money -= due;
+      this.loan = Math.max(0, this.loan - due);
+      if (this.loan < 0.5) this.loan = 0;
+      this.loanMissed = 0;
+      this.emit('loan');
+      this.notify(this.loan > 0
+        ? `Bank: loan instalment of ${money(due)} paid. ${money(Math.ceil(this.loan))} still owed.`
+        : `Bank: final instalment of ${money(due)} paid. Your loan is cleared!`, 'info', 0);
+    } else {
+      const fee = lateFee(this.loan);
+      this.loan += fee;
+      this.loanMissed++;
+      this.notify(`Bank: missed a ${money(due)} instalment. A ${money(fee)} late fee was added to your loan.`, 'warn', 0);
+    }
+  }
+
+  borrow(amount: number): ActionResult {
+    amount = Math.floor(amount);
+    if (amount <= 0) return { ok: false, text: 'Choose an amount to borrow.' };
+    if (amount > this.creditAvailable) {
+      return { ok: false, text: `The bank will only lend you ${money(this.creditAvailable)} more. Buy land or equipment to raise your limit.` };
+    }
+    this.loan += amount;
+    this.money += amount;
+    this.emit('loan');
+    return { ok: true, text: `Borrowed ${money(amount)}. You now owe ${money(Math.ceil(this.loan))}.` };
+  }
+
+  /** Repay part of the loan, or all of it (as much as you can afford) when no amount is given. */
+  repay(amount = Math.ceil(this.loan)): ActionResult {
+    if (this.loan <= 0) return { ok: false, text: 'You have no loan to repay.' };
+    const pay = Math.min(Math.floor(amount), Math.ceil(this.loan), Math.floor(this.money));
+    if (pay <= 0) return { ok: false, text: 'Not enough money to make a repayment.' };
+    this.money -= pay;
+    this.loan = Math.max(0, this.loan - pay);
+    if (this.loan < 0.5) {
+      this.loan = 0;
+      this.loanMissed = 0;
+    }
+    this.emit('loan');
+    return { ok: true, text: this.loan > 0 ? `Repaid ${money(pay)}. ${money(Math.ceil(this.loan))} still owed.` : `Repaid ${money(pay)}. Your loan is cleared!` };
+  }
+
+  // ---- Farm stand -------------------------------------------------------------------------
+
+  /** Different kinds of produce in stock. */
+  get standKinds(): number {
+    return PRODUCE_IDS.filter((id) => this.standStock[id] > 0).length;
+  }
+
+  get standOpen(): boolean {
+    return isOpen(this.time);
+  }
+
+  /** Customers per second while open, with the current stock and prices. */
+  get potentialCustomerRate(): number {
+    return customerRate(this.standLevel, this.standPriceLevel, this.standKinds);
+  }
+
+  /** Customers per second right now. */
+  get customerRate(): number {
+    return this.standOpen ? this.potentialCustomerRate : 0;
+  }
+
+  private updateStand(dt: number): void {
+    const rate = this.customerRate;
+    if (rate > 0 && this.customers.length < MAX_CUSTOMERS) {
+      this.nextCustomer -= dt * rate;
+      if (this.nextCustomer <= 0) {
+        // Exponential gaps between arrivals, measured in "customer units" so rate changes apply at once.
+        this.nextCustomer = -Math.log(1 - this.random() * 0.999);
+        const stocked = PRODUCE_IDS.filter((id) => this.standStock[id] > 0);
+        const crop = stocked[Math.floor(this.random() * stocked.length)];
+        this.customers.push(makeCustomer(++this.customerId, crop, this.random));
+      }
+    }
+    for (const c of this.customers) {
+      c.age += dt;
+      if (!c.served && c.age >= timeline(c).arrive) this.serve(c);
+    }
+    this.customers = this.customers.filter((c) => c.age < timeline(c).gone);
+  }
+
+  /** A customer at the counter buys what they came for, or something else if it sold out. */
+  private serve(c: Customer): void {
+    c.served = true;
+    if (this.standStock[c.crop] <= 0) {
+      const other = PRODUCE_IDS.find((id) => this.standStock[id] > 0);
+      if (!other) return;
+      c.crop = other;
+    }
+    const units = Math.min(c.want, this.standStock[c.crop]);
+    const total = Math.round(units * this.standPrice(c.crop));
+    this.standStock[c.crop] -= units;
+    c.bought = units;
+    this.money += total;
+    this.stats.earned += total;
+    this.stats.standEarned += total;
+    this.standToday += total;
+    const near = Math.hypot(this.tractor.x - STAND_COUNTER.x, this.tractor.z - STAND_COUNTER.z) < 35;
+    if (near) {
+      this.emit('customer');
+      this.notify(`A customer bought ${amountText(c.crop, units)} for ${money(total)}.`, 'good', 0);
+    }
+    if (this.standStocked <= 0) this.notify('The farm stand has sold out! Bring more produce.', 'warn', 30);
+  }
+
+  /** Move produce from the tractor tank onto the stand, as much as fits. */
+  stockStand(): ActionResult {
+    const { crop, amount } = this.grain;
+    if (!crop || amount <= 0) return { ok: false, text: 'The tank is empty.' };
+    if (!isProduce(crop)) return { ok: false, text: `The farm stand sells vegetables and flowers. Take the ${CROPS[crop].name} to the silo.` };
+    const space = this.standCapacity - this.standStocked;
+    if (space <= 0) return { ok: false, text: 'The stand is full. Wait for customers or upgrade the stand.' };
+    const moved = Math.min(space, amount);
+    this.standStock[crop] += moved;
+    this.grain = moved === amount ? { crop: null, amount: 0 } : { crop, amount: amount - moved };
+    this.emit('unload');
+    const rest = moved < amount ? ` The stand is full; ${amount - moved} ${CROPS[crop].unit} left in the tank.` : '';
+    return { ok: true, text: `Stocked the stand with ${amountText(crop, moved)}.${rest}` };
+  }
+
+  /** Sell the tank's produce to a wholesaler for a low price. */
+  wholesale(): ActionResult {
+    const { crop, amount } = this.grain;
+    if (!crop || amount <= 0) return { ok: false, text: 'The tank is empty.' };
+    if (!isProduce(crop)) return { ok: false, text: 'Sell grain at the silo.' };
+    const total = Math.round(amount * CROPS[crop].basePrice * WHOLESALE_RATE);
+    this.money += total;
+    this.stats.earned += total;
+    this.grain = { crop: null, amount: 0 };
+    this.emit('sell');
+    return { ok: true, text: `Sold ${amountText(crop, amount)} to the wholesaler for ${money(total)}.` };
+  }
+
+  setStandPrice(level: number): ActionResult {
+    if (!PRICE_LEVELS[level]) return { ok: false, text: 'Unknown price setting.' };
+    this.standPriceLevel = level;
+    return { ok: true, text: `Stand prices set to ${PRICE_LEVELS[level].name}.` };
+  }
+
+  buyStandUpgrade(): ActionResult {
+    const next = STAND_LEVELS[this.standLevel + 1];
+    if (!next) return { ok: false, text: 'The stand is fully upgraded.' };
+    const fail = this.spend(next.price, `the ${next.name}`);
+    if (fail) return fail;
+    this.standLevel++;
+    this.emit('buy');
+    return { ok: true, text: `Built the ${next.name}. More room for produce and more customers!` };
   }
 
   setSeed(crop: CropId): void {

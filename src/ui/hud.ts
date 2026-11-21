@@ -1,4 +1,4 @@
-import { CROPS, CROP_IDS, FERTILIZER_BONUS, FERTILIZER_COST_PER_TILE } from '../sim/crops';
+import { CROPS, CROP_IDS, FERTILIZER_BONUS, FERTILIZER_COST_PER_TILE, GRAIN_IDS, PRODUCE_IDS } from '../sim/crops';
 import { WEAR_THRESHOLD } from '../sim/equipment';
 import { TileState } from '../sim/field';
 import { clockText, nightFactor } from '../sim/daylight';
@@ -21,6 +21,7 @@ function bar(cls: string): { el: HTMLElement; fill: HTMLElement } {
 
 export class Hud {
   private moneyEl = h('div.money');
+  private loanEl = h('div.loan');
   private tractorEl = h('div.sub');
   private clockEl = h('div.clock');
   private speedEl = h('div.speed');
@@ -45,7 +46,7 @@ export class Hud {
 
   constructor(root: HTMLElement, private game: Game) {
     const stats = h('div.panel.stats', {},
-      h('div.row', {}, this.moneyEl, this.clockEl), this.tractorEl,
+      h('div.row', {}, this.moneyEl, this.clockEl), this.loanEl, this.tractorEl,
       h('div.row', {}, h('span.label', {}, 'Fuel'), this.fuel.el, this.fuelText),
       h('div.row', {}, h('span.label', {}, 'Cond'), this.wear.el, this.wearText),
       this.speedEl,
@@ -55,14 +56,14 @@ export class Hud {
     const imp = h('div.panel.implement', {}, this.impName, this.impState, this.seedRow, this.sprayRow, this.grainWrap);
     this.help = h('div.help', {},
       h('h2', {}, '🚜 Tractor Farm'),
-      h('p', {}, 'Harvest the ripe wheat in your Home Field, sell it at the silo, then plow, seed and grow your farm.'),
+      h('p', {}, 'Harvest the ripe wheat in your Home Field, sell it at the silo, then plow, seed and grow your farm. Grow vegetables and sunflowers to sell at the farm stand, and borrow from the bank when money is tight.'),
       h('table', {},
         ...[
           ['W A S D / Arrows', 'Drive & steer'],
           ['Shift', 'Brake'],
           ['Space', 'Lower / raise implement'],
-          ['E', 'Interact (garage, silo, fuel)'],
-          ['1 2 3', 'Choose seed: wheat, corn, canola'],
+          ['E', 'Interact (garage, silo, fuel, bank, farm stand)'],
+          ['1 - 7', 'Seed: wheat, corn, canola, potatoes, tomatoes, pumpkins, sunflowers'],
           ['C', 'Camera: chase / cab / overhead'],
           ['M', 'Mute / unmute sound'],
           ['Mouse wheel', 'Zoom'],
@@ -88,6 +89,9 @@ export class Hud {
     const g = this.game;
     const def = g.tractorDef;
     this.moneyEl.textContent = money(g.money);
+    this.loanEl.textContent = g.loan > 0 ? `Loan ${money(Math.ceil(g.loan))}${g.loanMissed ? ` · ${g.loanMissed} missed` : ''}` : '';
+    this.loanEl.style.display = g.loan > 0 ? '' : 'none';
+    this.loanEl.classList.toggle('late', g.loanMissed > 0);
     this.tractorEl.textContent = def.name;
     this.clockEl.textContent = `${nightFactor(g.time) > 0.5 ? '🌙' : '☀️'} ${clockText(g.time)}`;
     const fuelPct = g.fuel / def.fuelCapacity;
@@ -114,13 +118,17 @@ export class Hud {
     const cap = def.grainCapacity;
     this.grain.fill.style.width = `${(g.grain.amount / cap) * 100}%`;
     this.grain.el.classList.toggle('full', g.grain.amount >= cap - 15);
-    this.grainText.textContent = `${g.grain.amount} / ${cap} L${g.grain.crop ? ' ' + CROPS[g.grain.crop].name : ''}`;
+    const unit = g.grain.crop ? CROPS[g.grain.crop].unit : 'L';
+    this.grainText.textContent = `${g.grain.amount} / ${cap} ${unit}${g.grain.crop ? ' ' + CROPS[g.grain.crop].name : ''}`;
 
     const zone = g.zone;
     let prompt = '';
     if (zone?.id === 'shed') prompt = 'Press E to open the garage & shop';
     else if (zone?.id === 'silo' && g.storageLevel > 0) prompt = 'Press E to open the silo (store or sell grain)';
+    else if (zone?.id === 'silo' && g.grain.crop && CROPS[g.grain.crop].kind === 'produce') prompt = 'The silo only takes grain. Sell produce at the farm stand.';
     else if (zone?.id === 'silo') prompt = g.grain.amount > 0 ? `Press E to sell ${g.grain.amount} L` : 'Silo: bring grain here to sell';
+    else if (zone?.id === 'bank') prompt = 'Press E to visit the bank (loans)';
+    else if (zone?.id === 'stand') prompt = 'Press E to open the farm stand';
     else if (zone?.id === 'fuel') prompt = `Press E to refuel ($${Math.ceil((def.fuelCapacity - g.fuel) * FUEL_PRICE)})`;
     this.prompt.textContent = prompt;
     this.prompt.style.display = prompt ? '' : 'none';
@@ -145,7 +153,7 @@ export class Hud {
     const g = this.game;
     this.market.replaceChildren(
       h('div.title', {}, 'Market (per L)'),
-      ...CROP_IDS.map((id) => {
+      ...GRAIN_IDS.map((id) => {
         const tr = priceTrend(id, g.time);
         return h('div.row', {},
           h('span', {}, CROPS[id].name),
@@ -154,15 +162,21 @@ export class Hud {
       }),
       ...(g.storageLevel > 0
         ? [h('div.title.sub-title', {}, `Stored ${g.stored.toLocaleString()} / ${g.storageCapacity.toLocaleString()} L`),
-          ...CROP_IDS.filter((id) => g.storage[id] > 0).map((id) =>
+          ...GRAIN_IDS.filter((id) => g.storage[id] > 0).map((id) =>
             h('div.row.dim', {}, h('span', {}, CROPS[id].name), h('span', {}, `${g.storage[id].toLocaleString()} L`)))]
         : []),
+      h('div.title.sub-title', {}, `Farm stand · ${g.standOpen ? 'open' : 'closed'}`),
+      ...(g.standStocked > 0
+        ? PRODUCE_IDS.filter((id) => g.standStock[id] > 0).map((id) =>
+          h('div.row.dim', {}, h('span', {}, CROPS[id].name), h('span', {}, `${g.standStock[id].toLocaleString()} ${CROPS[id].unit}`)))
+        : [h('div.dim', {}, 'Empty: grow produce to stock it')]),
+      ...(g.standToday > 0 ? [h('div.row.dim', {}, h('span', {}, 'Takings today'), h('span', {}, money(g.standToday)))] : []),
     );
 
     this.seedRow.replaceChildren(
       h('span.label', {}, 'Seed'),
       ...CROP_IDS.map((id, i) =>
-        h(`span.chip${g.seedCrop === id ? '.active' : ''}`, {}, `${i + 1} ${CROPS[id].name} $${CROPS[id].seedCostPerTile}/tile`),
+        h(`span.chip${g.seedCrop === id ? '.active' : ''}${CROPS[id].kind === 'produce' ? '.veg' : ''}`, {}, `${i + 1} ${CROPS[id].name} $${CROPS[id].seedCostPerTile}`),
       ),
     );
 

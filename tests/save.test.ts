@@ -13,6 +13,9 @@ class MemoryStorage {
   }
 }
 
+/** Keys added in save version 3. */
+const V3_KEYS = ['loan', 'loanMissed', 'standLevel', 'standStock', 'standPriceLevel', 'standToday'];
+
 function setup() {
   const storage = new MemoryStorage();
   const saves = new FarmSaves(() => storage);
@@ -34,7 +37,7 @@ describe('farm save data', () => {
     game.lowerAnim = 0.75;
     game.tractor = { x: 30, z: 40, heading: 1.2, speed: 3, steer: -0.2, odometer: 200 };
     game.grain = { crop: 'canola', amount: 50 };
-    game.stats = { earned: 2000, harvested: 1500 };
+    game.stats = { earned: 2000, harvested: 1500, standEarned: 300 };
     game.fields[0].harvest(0);
     game.fields[0].plow(0);
     game.fields[0].seed(0, 'corn');
@@ -84,6 +87,8 @@ describe('farm save data', () => {
     delete v1.implementCondition;
     delete v1.storageLevel;
     delete v1.storage;
+    for (const key of V3_KEYS) delete v1[key];
+    v1.stats = { earned: 0, harvested: 0 };
     v1.fields = (v1.fields as Record<string, unknown>[]).map(({ fert: _, ...rest }) => rest);
     const restored = decodeSave(JSON.stringify(v1));
     expect(restored.money).toBe(5000);
@@ -92,7 +97,46 @@ describe('farm save data', () => {
     expect(restored.implementCondition.get('harvester_s')).toBe(1);
     expect(restored.storageLevel).toBe(0);
     expect(restored.fields[0].fert.every((v) => v === 0)).toBe(true);
-    expect(snapshot(restored).version).toBe(2);
+    expect(restored.loan).toBe(0);
+    expect(snapshot(restored).version).toBe(3);
+  });
+
+  it('upgrades a version 2 save with no loan, an empty cart and fair prices', () => {
+    const game = new Game();
+    game.money = 7000;
+    game.storageLevel = 1;
+    game.storage.corn = 900;
+    const v2: Record<string, unknown> = { ...snapshot(game), version: 2, stats: { earned: 10, harvested: 20 } };
+    for (const key of V3_KEYS) delete v2[key];
+    const restored = decodeSave(JSON.stringify(v2));
+    expect(restored.money).toBe(7000);
+    expect(restored.storage.corn).toBe(900);
+    expect(restored.loan).toBe(0);
+    expect(restored.standLevel).toBe(0);
+    expect(restored.standStock).toEqual({ potato: 0, tomato: 0, pumpkin: 0, sunflower: 0 });
+    expect(restored.stats).toEqual({ earned: 10, harvested: 20, standEarned: 0 });
+    expect(snapshot(restored).version).toBe(3);
+  });
+
+  it('round trips loans, the farm stand and vegetable crops', () => {
+    const game = new Game();
+    game.money = 1e5;
+    game.borrow(4000);
+    game.loanMissed = 2;
+    game.buyStandUpgrade();
+    game.standStock = { potato: 120, tomato: 0, pumpkin: 14, sunflower: 60 };
+    game.setStandPrice(2);
+    game.standToday = 345;
+    game.grain = { crop: 'tomato', amount: 80 };
+    game.fields[0].harvest(3);
+    game.fields[0].plow(3);
+    game.fields[0].seed(3, 'sunflower');
+    const saved = snapshot(game);
+    const restored = decodeSave(JSON.stringify(saved));
+    expect(snapshot(restored)).toEqual(saved);
+    expect(restored.fields[0].cropAt(3)).toBe('sunflower');
+    expect(restored.loan).toBe(4000);
+    expect(restored.standCapacity).toBe(1500);
   });
 
   it('supports detached equipment and empty inventories of implements', () => {
@@ -141,6 +185,14 @@ describe('farm save data', () => {
     ['storage without a silo', (s) => { s.storage.wheat = 10; }],
     ['negative storage', (s) => { s.storageLevel = 1; s.storage.corn = -5; }],
     ['overfilled storage', (s) => { s.storageLevel = 1; s.storage.corn = 99999; }],
+    ['negative loan', (s) => { s.loan = -10; }],
+    ['fractional missed payments', (s) => { s.loanMissed = 1.5; }],
+    ['unknown stand level', (s) => { s.standLevel = 7; }],
+    ['unknown price level', (s) => { s.standPriceLevel = -1; }],
+    ['overstocked stand', (s) => { s.standStock.potato = 99999; }],
+    ['grain on the stand', (s) => { (s.standStock as Record<string, number>).wheat = 5; }],
+    ['produce in the silo', (s) => { s.storageLevel = 1; (s.storage as Record<string, number>).potato = 5; }],
+    ['missing stand earnings', (s) => { delete (s.stats as Partial<typeof s.stats>).standEarned; }],
     ['implement too big for tractor', (s) => { s.ownedImplements.push('plow_xl'); s.implementCondition.plow_xl = 1; s.attached = 'plow_xl'; }],
   ];
   it.each(invalid)('rejects %s without mutating the live farm', (_, mutate) => {

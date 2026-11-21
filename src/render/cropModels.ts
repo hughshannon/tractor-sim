@@ -43,6 +43,10 @@ export const TURN_TINT: Record<CropId, number | null> = {
   wheat: 0xfff0a0,
   corn: 0xf0e8b0,
   canola: null,
+  potato: 0xe0d890,
+  tomato: null,
+  pumpkin: null,
+  sunflower: null,
 };
 
 /** Soil tint under the canopy: [r, g, b, amount] per stage. Fills gaps when seen from a distance. */
@@ -50,6 +54,10 @@ export const GROUND_TINT: Record<CropId, [number, number, number, number][]> = {
   wheat: [[0, 0, 0, 0], [86, 128, 48, 0.35], [92, 134, 52, 0.6], [196, 166, 86, 0.75]],
   corn: [[0, 0, 0, 0], [74, 116, 44, 0.25], [64, 104, 38, 0.55], [150, 128, 78, 0.55]],
   canola: [[0, 0, 0, 0], [76, 128, 70, 0.4], [196, 186, 52, 0.7], [146, 124, 74, 0.7]],
+  potato: [[0, 0, 0, 0], [70, 120, 50, 0.3], [66, 116, 46, 0.55], [130, 120, 70, 0.45]],
+  tomato: [[0, 0, 0, 0], [70, 116, 48, 0.2], [64, 110, 44, 0.4], [70, 110, 46, 0.4]],
+  pumpkin: [[0, 0, 0, 0], [74, 124, 50, 0.35], [66, 118, 46, 0.6], [120, 118, 64, 0.5]],
+  sunflower: [[0, 0, 0, 0], [80, 124, 50, 0.3], [72, 118, 46, 0.5], [96, 120, 50, 0.5]],
 };
 
 // ---------------------------------------------------------------------------------------------
@@ -173,6 +181,33 @@ const EAR = (() => {
 })();
 const CONE = new THREE.ConeGeometry(1, 1, 5, 1, true).translate(0, 0.5, 0);
 const CYL = new THREE.CylinderGeometry(0.75, 1, 1, 5, 1, true).translate(0, 0.5, 0);
+const ICO = new THREE.IcosahedronGeometry(1, 0);
+/** Closed disc, centred, axis along Y: a sunflower's seed head. */
+const DISC = new THREE.CylinderGeometry(1, 1, 1, 9, 1, false);
+/** Ribbed, squashed sphere sitting on y=0: a pumpkin. */
+const PUMPKIN = (() => {
+  const g = new THREE.SphereGeometry(1, 10, 6);
+  const p = g.attributes.position;
+  for (let i = 0; i < p.count; i++) {
+    const x = p.getX(i), y = p.getY(i), z = p.getZ(i);
+    const rib = 1 - 0.1 * Math.abs(Math.cos(Math.atan2(z, x) * 5));
+    p.setXYZ(i, x * rib, y * 0.72 + 0.72, z * rib);
+  }
+  return g;
+})();
+/** Flat 12-point star in the XZ plane (faces +Y): a ring of petals. */
+const STAR = (() => {
+  const pts: number[] = [];
+  const n = 12;
+  for (let k = 0; k < n; k++) {
+    const a0 = (k / n) * Math.PI * 2, a1 = ((k + 0.5) / n) * Math.PI * 2, a2 = ((k + 1) / n) * Math.PI * 2;
+    pts.push(0, 0, 0, Math.cos(a1), 0, Math.sin(a1), Math.cos(a0) * 0.55, 0, Math.sin(a0) * 0.55);
+    pts.push(0, 0, 0, Math.cos(a2) * 0.55, 0, Math.sin(a2) * 0.55, Math.cos(a1), 0, Math.sin(a1));
+  }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.Float32BufferAttribute(pts, 3));
+  return g;
+})();
 
 /** Evenly spaced positions along the segment with a little jitter. */
 function along(n: number, r: () => number, len = 1.8): number[] {
@@ -329,9 +364,187 @@ function canola(stage: Stage): THREE.BufferGeometry {
   return b.build();
 }
 
+// --- Potatoes ---------------------------------------------------------------------------------
+
+function potato(stage: Stage): THREE.BufferGeometry {
+  const def = CROPS.potato;
+  const b = new Builder();
+  const r = rng(404 + stage);
+  const leaf = col(def.youngColor), leafDark = col(0x2f6e2a), leafLight = col(0x72b450);
+  const flower = col(0xf2eef8), flowerMid = col(0xc8a8e0);
+  const dry = col(def.ripeColor), dryDark = col(0x7a7040), tuber = col(0xc8a070), tuberDark = col(0x9a7448);
+  const ripe = stage === Stage.Ripe;
+  const plants = stage === Stage.Sprout ? 5 : 3;
+  for (const x of along(plants, r)) {
+    const z = (r() - 0.5) * 0.12;
+    if (stage === Stage.Sprout) {
+      for (let k = 0; k < 3; k++) {
+        b.blade([x, 0, z], k / 3 * Math.PI * 2 + r(), 0.1 + r() * 0.04, 0.07,
+          { lift: 0.65, droop: 0.6, segs: 2, shape: 'leaf' }, leafDark, leaf);
+      }
+      continue;
+    }
+    // A mound of compound leaves, bigger each stage; ripe haulm yellows and flops over.
+    const n = stage === Stage.Leafy ? 6 : 8;
+    const len = stage === Stage.Leafy ? 0.24 : 0.36;
+    for (let k = 0; k < n; k++) {
+      const yaw = k / n * Math.PI * 2 + r() * 0.6;
+      const tip = b.blade([x + (r() - 0.5) * 0.06, 0.02 + r() * 0.08, z + (r() - 0.5) * 0.06], yaw, len * (0.8 + r() * 0.4), 0.13,
+        { lift: ripe ? 0.35 : 0.7 + r() * 0.2, droop: ripe ? 1.4 : 1.1, segs: 3, shape: 'leaf' },
+        ripe ? dryDark : leafDark, ripe ? dry : leafLight);
+      if (stage === Stage.Mature && k % 3 === 0) {
+        b.prim(OCTA, [tip.tip[0], tip.tip[1] + 0.12, tip.tip[2]], [0, 1, 0], [0.045, 0.035, 0.045], flowerMid, flower);
+      }
+    }
+    if (ripe) {
+      // A few tubers turned up on the surface.
+      for (let k = 0; k < 3; k++) {
+        const a = r() * Math.PI * 2, d = 0.12 + r() * 0.12;
+        b.prim(ICO, [x + Math.cos(a) * d, 0.03, z + Math.sin(a) * d * 0.6], [r() - 0.5, 1, r() - 0.5],
+          [0.06, 0.045, 0.05], tuberDark, tuber);
+      }
+    }
+  }
+  return b.build();
+}
+
+// --- Tomatoes ---------------------------------------------------------------------------------
+
+function tomato(stage: Stage): THREE.BufferGeometry {
+  const def = CROPS.tomato;
+  const b = new Builder();
+  const r = rng(505 + stage);
+  const leaf = col(def.youngColor), leafDark = col(0x2a6424), leafLight = col(0x68aa44);
+  const stake = col(0x8a6a44), stakeTop = col(0xb08a5a), stem = col(0x4c8a34);
+  const green = col(0x7cb840), greenLight = col(0xa8d060), red = col(def.ripeColor), redLight = col(0xff6a4a);
+  const H = def.height;
+  for (const x of along(3, r)) {
+    const z = (r() - 0.5) * 0.06;
+    if (stage === Stage.Sprout) {
+      for (let k = 0; k < 4; k++) {
+        b.blade([x, 0, z], k / 4 * Math.PI * 2 + r(), 0.1 + r() * 0.04, 0.06,
+          { lift: 0.7, droop: 0.7, segs: 2, shape: 'leaf' }, leafDark, leaf);
+      }
+      continue;
+    }
+    const top = stage === Stage.Leafy ? H * 0.45 : H * (0.9 + r() * 0.1);
+    // Wooden stake with the plant tied up beside it.
+    b.prim(CYL, [x + 0.05, 0, z], [0, 1, 0], [0.018, H * 1.05, 0.018], stake, stakeTop);
+    b.blade([x, 0, z], r() * Math.PI * 2, top, 0.03, { lift: 0.98, droop: 0.05, segs: 2, shape: 'stem' }, leafDark, stem);
+    const leaves = stage === Stage.Leafy ? 5 : 7;
+    for (let k = 0; k < leaves; k++) {
+      const y = 0.05 + (k / leaves) * top * 0.9;
+      b.blade([x, y, z], k * 2.4 + r() * 0.5, 0.2 + r() * 0.08, 0.11,
+        { lift: 0.55, droop: 1.2, segs: 3, shape: 'leaf' }, leafDark, leafLight);
+    }
+    if (stage === Stage.Leafy) continue;
+    // Trusses of fruit: green while growing, red when ripe.
+    const ripe = stage === Stage.Ripe;
+    const n = ripe ? 7 : 5;
+    for (let k = 0; k < n; k++) {
+      const a = k * 2.1 + r();
+      const y = top * (0.3 + 0.6 * (k / n));
+      const s = (ripe ? 0.055 : 0.04) * (0.85 + r() * 0.3);
+      b.prim(OCTA, [x + Math.cos(a) * 0.09, y, z + Math.sin(a) * 0.09], [0, 1, 0], [s, s * 0.9, s],
+        ripe ? red : green, ripe ? redLight : greenLight);
+    }
+  }
+  return b.build();
+}
+
+// --- Pumpkins ---------------------------------------------------------------------------------
+
+function pumpkin(stage: Stage): THREE.BufferGeometry {
+  const def = CROPS.pumpkin;
+  const b = new Builder();
+  const r = rng(606 + stage);
+  const leaf = col(def.youngColor), leafDark = col(0x2e6a28), leafLight = col(0x78b850), vine = col(0x5a9a3a);
+  const dry = col(0x9a9a58), dryDark = col(0x6a6438);
+  const orange = col(def.ripeColor), orangeLight = col(0xffa83a), unripe = col(0x6a9a3a), unripeLight = col(0xb8c860);
+  const stalk = col(0x6a5a30);
+  const ripe = stage === Stage.Ripe;
+  if (stage === Stage.Sprout) {
+    for (const x of along(3, r)) {
+      for (let k = 0; k < 2; k++) {
+        b.blade([x, 0, (r() - 0.5) * 0.1], k * Math.PI + r() * 0.4, 0.1, 0.1,
+          { lift: 0.5, droop: 0.4, segs: 2, shape: 'leaf' }, leafDark, leaf);
+      }
+    }
+    return b.build();
+  }
+  // Two plants per segment, each a low vine running along the row with broad leaves.
+  for (const x of along(2, r)) {
+    const z = (r() - 0.5) * 0.1;
+    const reach = stage === Stage.Leafy ? 0.35 : 0.7;
+    for (const side of [0, Math.PI]) {
+      const v = b.blade([x, 0.02, z], side + (r() - 0.5) * 0.5, reach, 0.03,
+        { lift: 0.06, droop: 0.05, segs: 2, shape: 'stem' }, vine, vine);
+      const leaves = stage === Stage.Leafy ? 3 : 4;
+      for (let k = 0; k < leaves; k++) {
+        const t = (k + 0.5) / leaves;
+        const at: V3 = [x + (v.tip[0] - x) * t, 0.03, z + (v.tip[2] - z) * t];
+        const big = stage === Stage.Leafy ? 0.2 : 0.28;
+        b.blade(at, r() * Math.PI * 2, big * (0.8 + r() * 0.4), big * 1.1,
+          { lift: ripe ? 0.3 : 0.62, droop: ripe ? 1.4 : 1.2, segs: 3, shape: 'leaf' },
+          ripe ? dryDark : leafDark, ripe ? dry : leafLight);
+      }
+    }
+    if (stage === Stage.Leafy) continue;
+    const size = ripe ? 0.24 : 0.12;
+    const px = x + (r() - 0.5) * 0.3, pz = z + (r() - 0.5) * 0.15;
+    b.prim(PUMPKIN, [px, 0, pz], [(r() - 0.5) * 0.2, 1, (r() - 0.5) * 0.2], [size, size * 0.85, size],
+      ripe ? orange : unripe, ripe ? orangeLight : unripeLight);
+    b.prim(CYL, [px, size * 1.15, pz], [0.2, 1, 0], [0.02, 0.08, 0.02], stalk, stalk);
+  }
+  return b.build();
+}
+
+// --- Sunflowers -------------------------------------------------------------------------------
+
+function sunflower(stage: Stage): THREE.BufferGeometry {
+  const def = CROPS.sunflower;
+  const b = new Builder();
+  const r = rng(707 + stage);
+  const leaf = col(def.youngColor), leafDark = col(0x346e26), leafLight = col(0x7ab84a), stem = col(0x5a9038);
+  const bud = col(0x5a8a30), budTip = col(0x9ab848);
+  const petal = col(def.ripeColor), petalTip = col(0xffe060), seeds = col(0x4a2e18), seedsMid = col(0x6a4422);
+  const H = def.height;
+  const plants = stage === Stage.Sprout ? 5 : 3;
+  for (const x of along(plants, r)) {
+    const z = (r() - 0.5) * 0.08;
+    if (stage === Stage.Sprout) {
+      for (let k = 0; k < 2; k++) {
+        b.blade([x, 0, z], k * Math.PI + r() * 0.5, 0.09, 0.07,
+          { lift: 0.55, droop: 0.4, segs: 2, shape: 'leaf' }, leafDark, leaf);
+      }
+      b.blade([x, 0, z], 0, 0.1, 0.012, { lift: 1, droop: 0, segs: 1, shape: 'stem' }, leafDark, stem);
+      continue;
+    }
+    const top = stage === Stage.Leafy ? H * 0.3 : H * (stage === Stage.Mature ? 0.82 : 0.95) * (0.92 + r() * 0.16);
+    const s = b.blade([x, 0, z], r() * Math.PI * 2, top, 0.04, { lift: 0.99, droop: 0.04, segs: 2, shape: 'stem' }, leafDark, stem);
+    const leaves = stage === Stage.Leafy ? 4 : 6;
+    for (let k = 0; k < leaves; k++) {
+      const y = 0.04 + (k / leaves) * top * 0.85;
+      b.blade([x, y, z], k * 2.5 + r() * 0.4, 0.22 + (1 - k / leaves) * 0.1, 0.16,
+        { lift: 0.45, droop: 1.1, segs: 3, shape: 'leaf' }, leafDark, leafLight);
+    }
+    if (stage === Stage.Leafy) continue;
+    const [tx, ty, tz] = s.tip;
+    if (stage === Stage.Mature) {
+      b.prim(OCTA, [tx, ty + 0.04, tz], [0, 1, 0], [0.09, 0.07, 0.09], bud, budTip);
+      continue;
+    }
+    // Ripe: an open head facing out over the row, tilted slightly down.
+    const face: V3 = [0.15, 0.3, 1];
+    b.prim(STAR, [tx, ty, tz + 0.03], face, [0.3, 1, 0.3], petal, petalTip);
+    b.prim(DISC, [tx, ty, tz + 0.05], face, [0.15, 0.05, 0.15], seeds, seedsMid);
+  }
+  return b.build();
+}
+
 // ---------------------------------------------------------------------------------------------
 
-const BUILDERS: Record<CropId, (s: Stage) => THREE.BufferGeometry> = { wheat, corn, canola };
+const BUILDERS: Record<CropId, (s: Stage) => THREE.BufferGeometry> = { wheat, corn, canola, potato, tomato, pumpkin, sunflower };
 let cache: THREE.BufferGeometry[][] | null = null;
 
 /** Geometries indexed [cropIndex][stage], built once and shared by every field. */

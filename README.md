@@ -17,8 +17,8 @@ npm run dev        # http://localhost:5000
 | W A S D / Arrows | Drive & steer |
 | Shift | Brake |
 | Space | Lower / raise implement |
-| E | Interact: garage & shop, sell grain at silo, refuel |
-| 1 2 3 | Choose seed (wheat, corn, canola) |
+| E | Interact: garage & shop, sell grain at silo, refuel, bank, farm stand |
+| 1 – 7 | Choose seed (wheat, corn, canola, potatoes, tomatoes, pumpkins, sunflowers) |
 | C | Cycle camera: chase / cab (first-person) / overhead |
 | Mouse wheel | Zoom |
 | Mouse drag | Look around (cab view) |
@@ -34,6 +34,16 @@ Swap implements (plow, seeder, sprayer, harvester) at the garage. Prices drift o
 - **Wear & repairs**: tractors wear with distance driven, implements with time worked. Below 50% condition they
   work slower and burn more fuel; at 0% they stop. Repair at the garage workshop.
 - **Equipment tiers**: Scout 50 (fast utility), Workhorse 200, Titan 400; 9 m implements need 180 hp.
+
+**Vegetables & the farm stand:** potatoes, tomatoes, pumpkins and sunflowers are planted, grown and harvested like
+grain, but the silo won't take them. Drive to the **farm stand** by the road (east of the silo) and press E to stock it from
+the tank. Between 07:00 and 20:00 customers walk in from the road and buy what's on the counter. More kinds of produce
+and lower prices bring more customers; premium prices earn more per sale. Upgrade the roadside cart to a farm stand
+($6,000) or farm shop ($18,000) for more space and more customers. A wholesaler buys a tank of produce at half price.
+
+**Bank:** short of money? The bank, west of the garage, lends up to $8,000 plus half of what you've paid for land,
+buildings and equipment. Interest is 3% per game day. Each morning at 07:30 the bank collects 10% of the balance. If
+you can't cover it, a 3% late fee is added instead. Repay early at any time.
 
 ## Development
 
