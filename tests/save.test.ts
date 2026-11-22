@@ -118,6 +118,24 @@ describe('farm save data', () => {
     expect(snapshot(restored).version).toBe(SAVE_VERSION);
   });
 
+  it('forgives outstanding loans once when upgrading a version 4 save', () => {
+    const game = new Game();
+    game.money = 1e5;
+    game.borrow(4000);
+    game.loanMissed = 3;
+    const v4 = { ...snapshot(game), version: 4 };
+    const restored = decodeSave(JSON.stringify(v4));
+    expect(restored.loan).toBe(0);
+    expect(restored.loanMissed).toBe(0);
+    expect(restored.money).toBe(1e5 + 4000);
+    expect(restored.messages.some((m) => /amnesty/i.test(m.text))).toBe(true);
+    // The amnesty does not repeat: a current save keeps its loan.
+    restored.borrow(2000);
+    const again = decodeSave(JSON.stringify(snapshot(restored)));
+    expect(again.loan).toBe(2000);
+    expect(again.messages.some((m) => /amnesty/i.test(m.text))).toBe(false);
+  });
+
   it('round trips loans, the farm stand and vegetable crops', () => {
     const game = new Game();
     game.money = 1e5;

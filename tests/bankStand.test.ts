@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { BASE_CREDIT, LATE_FEE_RATE, LOAN_RATE, creditLimit, instalment } from '../src/sim/bank';
+import { BASE_CREDIT, LOAN_RATE, creditLimit, instalment } from '../src/sim/bank';
 import { CROPS, PRODUCE_IDS, tileYield } from '../src/sim/crops';
 import { DAY_LENGTH } from '../src/sim/daylight';
 import { IMPLEMENTS } from '../src/sim/equipment';
@@ -65,7 +65,7 @@ describe('bank loans', () => {
     expect(g.loanMissed).toBe(0);
   });
 
-  it('adds a late fee when the instalment cannot be paid', () => {
+  it('records a missed instalment without charging a late fee', () => {
     const g = new Game();
     g.borrow(5000);
     g.money = 10;
@@ -74,9 +74,8 @@ describe('bank loans', () => {
     g.update(0.1, idle);
     expect(g.money).toBe(10);
     expect(g.loanMissed).toBe(1);
-    const fee = g.loan - before;
-    expect(fee).toBeGreaterThanOrEqual(Math.ceil(before * LATE_FEE_RATE));
-    expect(fee).toBeLessThan(Math.ceil(before * LATE_FEE_RATE) + 1.1);
+    // Only a fraction of a cent of interest from the tick itself; no penalty.
+    expect(g.loan - before).toBeLessThan(0.01);
     expect(g.messages.some((m) => /missed a \$\d+ instalment/i.test(m.text))).toBe(true);
   });
 

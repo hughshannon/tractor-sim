@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import { nightFactor, sunHeight, hourAt } from '../sim/daylight';
+import { nightFactor, sunAngle, sunHeight } from '../sim/daylight';
 import { hash } from './util';
 
 const DAY_SKY = new THREE.Color(0x9fd3f0);
@@ -131,7 +131,7 @@ export class DayNight {
 
     // The sun travels east (+X) to west (-X), tilted south so shadows keep some length at noon.
     // At night the same light becomes the moon, opposite the sun.
-    const theta = ((hourAt(time) - 6) / 24) * Math.PI * 2;
+    const theta = sunAngle(time);
     const up = s > -0.02;
     const a = up ? theta : theta + Math.PI;
     const dir = new THREE.Vector3(Math.cos(a), Math.max(0.12, Math.sin(a)), 0.45).normalize();
