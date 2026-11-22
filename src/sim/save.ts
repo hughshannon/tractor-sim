@@ -7,9 +7,9 @@ import { PRICE_LEVELS, STAND_LEVELS } from './stand';
 
 export const SAVE_KEY = 'tractor-farm.save';
 export const BACKUP_KEY = 'tractor-farm.previous-save';
-export const SAVE_VERSION = 4;
+export const SAVE_VERSION = 5;
 /** Older versions decodeSave can upgrade. */
-const MIGRATABLE = [1, 2, 3];
+const MIGRATABLE = [1, 2, 3, 4];
 
 /** Only simulation state belongs in a save; definitions and effects stay in code. */
 export function snapshot(game: Game) {
@@ -82,13 +82,21 @@ const conditions = (value: unknown, owned: string[]): value is Record<string, nu
 /**
  * Upgrade an older save to the current shape, one version at a time. Version 1 gains equipment in perfect
  * condition, no storage and no fertilized tiles; version 2 gains no loan and an empty roadside cart;
- * version 3 gains the boulder fields, unowned and untouched. The result still goes through full validation.
+ * version 3 gains the boulder fields, unowned and untouched; version 4 gets the one-time loan amnesty.
+ * The result still goes through full validation.
  */
 function migrate(value: RecordValue): RecordValue {
   if (value.version === 1) value = migrate1(value);
   if (value.version === 2) value = migrate2(value);
   if (value.version === 3) value = migrate3(value);
+  if (value.version === 4) value = migrate4(value);
   return value;
+}
+
+/** One-time bank amnesty: every outstanding loan and missed instalment is written off. */
+function migrate4(value: RecordValue): RecordValue {
+  const forgiven = typeof value.loan === 'number' && value.loan > 0 ? Math.ceil(value.loan) : 0;
+  return { ...value, version: 5, loan: 0, loanMissed: 0, amnesty: forgiven };
 }
 
 /** Append fields that were added to the farm after the save was made, in their starting state. */
@@ -232,6 +240,10 @@ export function decodeSave(raw: string): Game {
   game.standStock = { ...value.standStock };
   game.standPriceLevel = value.standPriceLevel;
   game.standToday = value.standToday;
+  const amnesty = (value as RecordValue).amnesty;
+  if (typeof amnesty === 'number' && amnesty > 0) {
+    game.notify(`Bank amnesty: your loan of $${amnesty.toLocaleString()} has been written off. This is a one-time offer.`, 'good', 0);
+  }
   value.fields.forEach((saved, index) => {
     const field = game.fields[index];
     field.owned = saved.owned;

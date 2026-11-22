@@ -1,4 +1,4 @@
-import { LOAN_RATE, creditLimit, instalment, lateFee } from './bank';
+import { LOAN_RATE, creditLimit, instalment } from './bank';
 import {
   CROPS, FERTILIZER_COST_PER_TILE, GRAIN_IDS, PRODUCE_IDS, amountText, isGrain, isProduce,
   type CropId, type GrainId, type ProduceId,
@@ -603,10 +603,8 @@ export class Game {
         ? `Bank: loan instalment of ${money(due)} paid. ${money(Math.ceil(this.loan))} still owed.`
         : `Bank: final instalment of ${money(due)} paid. Your loan is cleared!`, 'info', 0);
     } else {
-      const fee = lateFee(this.loan);
-      this.loan += fee;
       this.loanMissed++;
-      this.notify(`Bank: missed a ${money(due)} instalment. A ${money(fee)} late fee was added to your loan.`, 'warn', 0);
+      this.notify(`Bank: missed a ${money(due)} instalment. No fee is charged; pay when you can.`, 'warn', 0);
     }
   }
 

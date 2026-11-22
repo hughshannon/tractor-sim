@@ -16,11 +16,26 @@ export function clockText(t: number): string {
   return `${String(Math.floor(mins / 60)).padStart(2, '0')}:${String(mins % 60).padStart(2, '0')}`;
 }
 
+/** Clock hour the sun rises. */
+export const SUNRISE_HOUR = 3;
+/** Clock hour the sun sets. Night runs from here to SUNRISE_HOUR. */
+export const SUNSET_HOUR = 21;
+
 /**
- * Sun elevation as sin(angle above the horizon), -1..1. Sunrise is 06:00, noon 12:00, sunset 18:00.
+ * Sun angle along its path, in radians: 0 at sunrise, PI/2 at midday, PI at sunset, 3PI/2 in the middle
+ * of the night. Day and night each take half a turn, so a short night simply passes faster.
+ */
+export function sunAngle(t: number): number {
+  const day = SUNSET_HOUR - SUNRISE_HOUR;
+  const since = (hourAt(t) - SUNRISE_HOUR + 24) % 24;
+  return since < day ? (since / day) * Math.PI : Math.PI + ((since - day) / (24 - day)) * Math.PI;
+}
+
+/**
+ * Sun elevation as sin(angle above the horizon), -1..1. Sunrise is 03:00, midday 12:00, sunset 21:00.
  */
 export function sunHeight(t: number): number {
-  return Math.sin(((hourAt(t) - 6) / 24) * Math.PI * 2);
+  return Math.sin(sunAngle(t));
 }
 
 /** 0 in full daylight, 1 at full night, with a smooth dusk/dawn transition around the horizon. */

@@ -1,10 +1,10 @@
-import { COLLATERAL_RATE, INSTALMENT_RATE, LATE_FEE_RATE, LOAN_RATE, instalment } from '../sim/bank';
+import { COLLATERAL_RATE, INSTALMENT_RATE, LOAN_RATE, instalment } from '../sim/bank';
 import { DAY_LENGTH, clockText } from '../sim/daylight';
 import type { Game } from '../sim/game';
 import { h, money } from './dom';
 import { Panel } from './panel';
 
-const pct = (n: number) => `${Math.round(n * 100)}%`;
+const pct = (n: number) => `${Math.round(n * 1000) / 10}%`;
 
 /** Bank modal: borrow against the farm and repay the loan. */
 export class Bank extends Panel {
@@ -54,7 +54,7 @@ export class Bank extends Panel {
       h('div.dim.note', {},
         `Interest: ${pct(LOAN_RATE)} per day (a day is ${DAY_LENGTH / 60} minutes), added continuously. `
         + `Every morning at ${clockText(0)} the bank collects ${pct(INSTALMENT_RATE)} of the balance. `
-        + `If you can't cover it, a late fee of ${pct(LATE_FEE_RATE)} of the balance is added instead.`),
+        + `If you can't cover it, the instalment is marked missed. There are no late fees.`),
     );
     return [account, borrow, repay, terms];
   }
