@@ -17,6 +17,7 @@ import { Shop } from './ui/shop';
 import { Silo } from './ui/silo';
 import { Stand } from './ui/stand';
 import { saveControls } from './ui/saveControls';
+import { TouchControls } from './ui/touch';
 
 const STEP = 1 / 60;
 
@@ -66,6 +67,15 @@ const toggleMute = () => {
 muteBtn.addEventListener('click', toggleMute);
 uiRoot.append(muteBtn);
 
+const touch = new TouchControls(uiRoot, input);
+const enterTouchMode = () => {
+  hud.setTouchMode(true);
+  // Beside the touch buttons rather than squeezed between the stats and implement panels.
+  touch.adopt(muteBtn);
+};
+touch.onActivate = enterTouchMode;
+if (touch.active) enterTouchMode();
+
 const panels = { shop, silo, bank, stand };
 const openPanel = () => Object.values(panels).find((p) => p.open);
 const paused = () => openPanel() !== undefined || hud.helpVisible;
@@ -93,7 +103,7 @@ input.on('KeyM', toggleMute);
 CROP_IDS.forEach((id, i) => input.on([`Digit${i + 1}`, `Numpad${i + 1}`], () => !paused() && game.setSeed(id)));
 
 if (loaded.status === 'loaded') game.notify('Welcome back! Your farm has been restored.', 'good', 0);
-else game.notify('Your wheat is ripe! Lower the harvester with Space and drive through the Home Field.', 'info', 0);
+else game.notify(`Your wheat is ripe! Lower the harvester with ${touch.active ? '⇅' : 'Space'} and drive through the Home Field.`, 'info', 0);
 
 let last = performance.now();
 let acc = 0;
@@ -124,6 +134,8 @@ function frame(now: number) {
   tractorView.lamps.set(lampLevel);
   tractorView.showBeam(rig.mode !== 'cab');
   hud.update(dt);
+  touch.setVisible(!paused());
+  touch.update(hud.canInteract, game.implement !== null);
 
   const speed = Math.abs(t.speed);
   const throttle = paused() ? 0 : Math.abs(drive.throttle);

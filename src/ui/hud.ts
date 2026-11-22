@@ -43,6 +43,12 @@ export class Hud {
   private help: HTMLElement;
   private shownMessages = new WeakSet<object>();
   private slowTimer = 0;
+  private touchHelp = h('p.touch-help.hidden', {},
+    'Touch: drag on the left side to drive and steer, hold Brake to stop, ⇅ lowers or raises the implement, Use opens buildings, 🎥 changes camera. Tap a seed to pick it. Pinch to zoom.');
+  /** On-screen touch controls are in use: word hints for them instead of keys. */
+  touchMode = false;
+  /** Whether an interaction prompt (garage, silo, fuel...) is showing. */
+  canInteract = false;
 
   constructor(root: HTMLElement, private game: Game) {
     const stats = h('div.panel.stats', {},
@@ -71,6 +77,7 @@ export class Hud {
           ['H', 'Show / hide this help'],
         ].map(([k, v]) => h('tr', {}, h('td.key', {}, k), h('td', {}, v))),
       ),
+      this.touchHelp,
       h('p.dim', {}, 'Cycle: harvest → plow → seed → (spray fertilizer) → wait → harvest. Swap implements, repair worn equipment and build grain storage at the garage.'),
       h('button.btn', { onclick: () => this.toggleHelp(false) }, 'Start farming'),
     );
@@ -79,6 +86,12 @@ export class Hud {
 
   get helpVisible(): boolean {
     return !this.help.classList.contains('hidden');
+  }
+
+  setTouchMode(on: boolean): void {
+    this.touchMode = on;
+    this.touchHelp.classList.toggle('hidden', !on);
+    this.slowTimer = 0;
   }
 
   toggleHelp(show = !this.helpVisible): void {
@@ -110,7 +123,7 @@ export class Hud {
     this.impName.classList.toggle('worn', imp !== null && iw < WEAR_THRESHOLD);
     this.impState.textContent = !imp ? 'Attach one at the garage'
       : iw <= 0 ? '✖ BROKEN — repair at the garage'
-        : g.lowered ? '▼ LOWERED — working' : '▲ Raised  [Space] to lower';
+        : g.lowered ? '▼ LOWERED — working' : `▲ Raised  ${this.touchMode ? 'tap ⇅' : '[Space]'} to lower`;
     this.impState.classList.toggle('on', g.lowered && iw > 0);
     this.seedRow.style.display = imp?.kind === 'seeder' ? '' : 'none';
     this.sprayRow.style.display = imp?.kind === 'sprayer' ? '' : 'none';
@@ -130,6 +143,8 @@ export class Hud {
     else if (zone?.id === 'bank') prompt = 'Press E to visit the bank (loans)';
     else if (zone?.id === 'stand') prompt = 'Press E to open the farm stand';
     else if (zone?.id === 'fuel') prompt = `Press E to refuel ($${Math.ceil((def.fuelCapacity - g.fuel) * FUEL_PRICE)})`;
+    this.canInteract = prompt.startsWith('Press E');
+    if (this.touchMode) prompt = prompt.replace('Press E', 'Tap Use');
     this.prompt.textContent = prompt;
     this.prompt.style.display = prompt ? '' : 'none';
 
@@ -176,7 +191,10 @@ export class Hud {
     this.seedRow.replaceChildren(
       h('span.label', {}, 'Seed'),
       ...CROP_IDS.map((id, i) =>
-        h(`span.chip${g.seedCrop === id ? '.active' : ''}${CROPS[id].kind === 'produce' ? '.veg' : ''}`, {}, `${i + 1} ${CROPS[id].name} $${CROPS[id].seedCostPerTile}`),
+        // pointerdown, not click: the row is rebuilt every 0.25 s, which can swallow a slower tap.
+        h(`span.chip${g.seedCrop === id ? '.active' : ''}${CROPS[id].kind === 'produce' ? '.veg' : ''}`,
+          { onpointerdown: () => g.setSeed(id) },
+          this.touchMode ? `${CROPS[id].name} $${CROPS[id].seedCostPerTile}` : `${i + 1} ${CROPS[id].name} $${CROPS[id].seedCostPerTile}`),
       ),
     );
 

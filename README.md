@@ -25,6 +25,11 @@ npm run dev        # http://localhost:5000
 | M | Mute / unmute sound |
 | H | Help |
 
+**Touch screens** (phones, tablets) get on-screen controls automatically: drag anywhere on the left half for a
+joystick (up = forward, down = reverse, sideways = steer), hold **Brake**, tap **⇅** to lower/raise the implement,
+**Use** to interact (it lights up near a building), 🎥 for camera, **?** for help. Tap a seed chip to choose it,
+pinch to zoom, and drag with one finger to look around in the cab view.
+
 **Loop:** harvest ripe crops → sell at the silo → plow stubble → seed → (spray fertilizer) → wait for growth → harvest again.
 Swap implements (plow, seeder, sprayer, harvester) at the garage. Prices drift over time, so check the market panel before selling.
 
@@ -84,4 +89,5 @@ and use **Deploy → Static** (build: `npm ci && npm run build`, public dir: `di
 - [x] Synthesised sound (engine, implements, effects, ambience)
 - [x] Day/night cycle (10-minute days, floodlit yard, tractor headlights & work lights, field-edge lights)
 - [ ] M5 Seasons, weather, save/load
-- [ ] M6 Particles, minimap, touch controls
+- [x] Touch controls
+- [ ] M6 Particles, minimap

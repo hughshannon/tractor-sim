@@ -21,7 +21,8 @@ const MAX_LOOK_PITCH = 0.9;
 
 /**
  * Smooth chase camera with zoom (mouse wheel), a first-person cab view and an overhead mode.
- * In the cab view, drag with the mouse to look around; the view eases back to the front on release.
+ * In the cab view, drag (mouse or finger) to look around; the view eases back to the front on release.
+ * On touch screens, pinch with two fingers to zoom.
  */
 export class CameraRig {
   mode: CameraMode = 'follow';
@@ -35,6 +36,8 @@ export class CameraRig {
   private lookPitch = 0;
   private dragging = false;
   private tmp = new THREE.Vector3();
+  private touches = new Map<number, { x: number; y: number }>();
+  private pinchDist = 0;
 
   constructor(private camera: THREE.PerspectiveCamera, dom: HTMLElement) {
     dom.addEventListener(
@@ -45,19 +48,59 @@ export class CameraRig {
       },
       { passive: false },
     );
+    // Two fingers on the canvas pinch-zoom; one drags the cab view. Touch gestures are ours, not the browser's.
+    dom.style.touchAction = 'none';
     dom.addEventListener('pointerdown', (e) => {
+      if (e.pointerType === 'touch') {
+        this.touches.set(e.pointerId, { x: e.clientX, y: e.clientY });
+        dom.setPointerCapture(e.pointerId);
+        if (this.touches.size === 2) {
+          this.dragging = false;
+          this.pinchDist = this.touchSpread();
+          return;
+        }
+        if (this.touches.size > 2) return;
+      }
       if (this.mode !== 'cab' || e.button !== 0) return;
       this.dragging = true;
       dom.setPointerCapture(e.pointerId);
     });
     dom.addEventListener('pointermove', (e) => {
-      if (!this.dragging) return;
-      this.lookYaw = clamp(this.lookYaw - e.movementX * 0.005, -MAX_LOOK_YAW, MAX_LOOK_YAW);
-      this.lookPitch = clamp(this.lookPitch - e.movementY * 0.005, -MAX_LOOK_PITCH, MAX_LOOK_PITCH);
+      const last = this.touches.get(e.pointerId);
+      if (last) {
+        const dx = e.clientX - last.x;
+        const dy = e.clientY - last.y;
+        last.x = e.clientX;
+        last.y = e.clientY;
+        if (this.touches.size === 2) {
+          const d = this.touchSpread();
+          // Fingers apart = zoom in (camera closer).
+          if (this.pinchDist > 0 && d > 0) this.zoom = clamp(this.zoom * (this.pinchDist / d), 0.5, 2.5);
+          this.pinchDist = d;
+          return;
+        }
+        if (this.dragging) this.lookBy(dx, dy);
+        return;
+      }
+      if (this.dragging) this.lookBy(e.movementX, e.movementY);
     });
-    const release = () => (this.dragging = false);
+    const release = (e: PointerEvent) => {
+      this.touches.delete(e.pointerId);
+      this.pinchDist = 0;
+      this.dragging = false;
+    };
     dom.addEventListener('pointerup', release);
     dom.addEventListener('pointercancel', release);
+  }
+
+  private lookBy(dx: number, dy: number): void {
+    this.lookYaw = clamp(this.lookYaw - dx * 0.005, -MAX_LOOK_YAW, MAX_LOOK_YAW);
+    this.lookPitch = clamp(this.lookPitch - dy * 0.005, -MAX_LOOK_PITCH, MAX_LOOK_PITCH);
+  }
+
+  private touchSpread(): number {
+    const [a, b] = [...this.touches.values()];
+    return a && b ? Math.hypot(a.x - b.x, a.y - b.y) : 0;
   }
 
   /** Point the cab view from this object (a child of the tractor body at the driver's eyes). */
